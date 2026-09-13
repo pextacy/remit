@@ -97,6 +97,24 @@ to the Aave pool, `supply`/`withdraw` with `onBehalfOf` and `to` pinned `EqualTo
 
 **Closes** G4-1, G4-2, G4-3, and the on-chain half of G4-4.
 
+**Status — 2026-09-14: complete on a fork of Base Sepolia; the public-testnet hash is blocked on funding (OQ-6).**
+
+| Task | State |
+|---|---|
+| 1.1 2-of-3 Safe | done — deployed through the canonical v1.4.1 proxy factory |
+| 1.2 Roles v2 instance, module enabled, agent assigned | done — proxy from ModuleProxyFactory 1.2.0 at the 2.1.0 mastercopy; membership confirmed by simulation, and a stranger confirmed to have none |
+| 1.3 Minimal preset | done — 2 targets, 3 functions, `onBehalfOf`/`to` pinned with `EqualToAvatar`, `ExecutionOptions.None` |
+| 1.4 `supply` by hand | done — approve, supply and withdraw all execute; the Safe's balance falls from 100 to 60 USDC |
+| 1.5 Out-of-preset call, decoded | done — **three** distinct named refusals, not one: `ParameterNotAllowed`, `FunctionNotAllowed`, `TargetAddressNotAllowed`, plus an on-chain revert of the same call |
+
+`pnpm --filter ops p1 --network anvil` reruns the whole phase end to end in about ten
+seconds and asserts each outcome. Four consecutive clean runs, including one against a
+fork started two seconds earlier.
+
+The kill switch was also pulled and restored inside that run — `NoMembership()` on the
+next preflight — which is P4 work arriving early because the ninety seconds it took was
+worth more than the tidiness of leaving it for Tuesday.
+
 **Exit gate**
 - A Base Sepolia transaction hash from `execTransactionWithRole` via `cast`.
 - A deliberate out-of-preset call (recipient = a random address) reverting with a **decoded

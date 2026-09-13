@@ -4,7 +4,7 @@ Verification tasks that are blocked, and decisions the P0 pass forced but cannot
 alone. The rule that produced this file: when a value cannot be verified against a live
 source, write the task down and stop — do not guess (CLAUDE.md §2.2).
 
-Status as of **2026-09-13**, end of the P0 pass.
+Status as of **2026-09-14**, end of the P1 pass.
 
 ---
 
@@ -31,6 +31,29 @@ an acceptable source, but it is not the same as a live 200.
 
 Until then the bridge cannot be written against the real service, and every P3 estimate
 carries this risk.
+
+### OQ-6 — no funded key, so no Base Sepolia transaction hash yet
+
+P1 is complete against a local Anvil fork of Base Sepolia: a real Safe, a real Roles v2
+instance at the canonical mastercopy, the preset applied, value moved, and four refusals
+with names. What it does not have is a **transaction hash on the public testnet**, because
+that needs an EOA with Base Sepolia ETH and the Aave-listed test USDC, and no key exists
+in this environment.
+
+That is the difference between P1 being done and P1's exit gate being met. Everything is
+in place to close it in minutes once there is a key:
+
+1. Fund an EOA with Base Sepolia ETH, and get the Aave-listed USDC
+   (`0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f`, not Circle's testnet USDC).
+2. Put three keys in `.env`: `SAFE_OWNER_1_PRIVATE_KEY`, `SAFE_OWNER_2_PRIVATE_KEY`,
+   `AGENT_SIGNER_PRIVATE_KEY`, plus `SAFE_OWNER_3_ADDRESS` for the cold third owner and
+   `ATTACKER_ADDRESS` for the out-of-preset probe.
+3. Run, in order, against `--network base-sepolia`: `safe:deploy`, `roles:deploy`,
+   `roles:build`, `roles:apply`, then `run exec --action approve`, `--action supply`, and
+   `--action withdraw --violate --force`.
+
+The scripts are network-agnostic; the fork path and the testnet path differ only in where
+the signing authority comes from.
 
 ### OQ-2 — DoraHacks registration, Discord, office hours
 

@@ -29,7 +29,10 @@ pnpm --filter @remit/core verify:constants
 |---|---|---|---|
 | Roles mastercopy | `0x9646fDAD06d3e24444381f44362a3B0eB343D337` | gnosisguild/zodiac-modifier-roles, `packages/evm/mastercopies.json` → `Roles` → `2.1.0`, tag `zodiac-roles-sdk-v4.1.3`, commit `820e5bc975d1817bdd4bc4a95226f553f7b67b68` | `eth_getCode` returns 24401 bytes on **both** 8453 and 84532, byte-identical |
 | Mastercopy version | **2.1.0** | same file; `packages/evm/package.json` is also `2.1.0` | — |
-| Zodiac ModuleProxyFactory | `0x000000000000aDdB49795b0f9bA5BC298cDda236` | same repo, `lib/safe/zodiac-contracts.ts` in KeeperHub cross-references the same address | `eth_getCode` returns 2046 bytes on both chains |
+| Zodiac ModuleProxyFactory | `0x000000000000aDdB49795b0f9bA5BC298cDda236` | gnosisguild/zodiac, `mastercopies/factory/1.2.0/ModuleProxyFactory/`, commit `89352c4f05d4b223b9c555ca963a787fd930da2d` | `eth_getCode` returns 2046 bytes on both chains, **byte-identical to that directory's `bytecode.json`**; 1.0.0 and 1.1.0 do not match |
+| ModuleProxyFactory version | **1.2.0** | determined by the bytecode comparison above, not by a version string | — |
+| `deployModule` | `(address,bytes,uint256)`, emits `ModuleProxyCreation(address,address)` | that ABI, committed at `packages/remit-core/src/chain/abi/module-proxy-factory.ts` | deployed a Roles proxy for a Safe on the fork |
+| Roles `setUp` initializer | `setUp(bytes)` decoding `(address owner, address avatar, address target)` | `packages/evm/contracts/Roles.sol` lines 51-63, pinned tag | a proxy initialised with `(safe, safe, safe)` accepted `assignRoles` from the Safe and refused it from anyone else |
 | `execTransactionWithRole` | `(address,uint256,bytes,uint8,bytes32,bool)` → `0xc6fe8747` | deployed ABI in `mastercopies.json`, `Roles` `2.1.0` | signature rebuilt from the ABI; selector from `cast sig` |
 | `assignRoles` (kill switch) | `(address,bytes32[],bool[])` → `0x957ed2b3` | same | same |
 | `scopeFunction` | `(bytes32,address,bytes4,(uint8,uint8,uint8,bytes)[],uint8)` → `0x7508dd98` | same | same |
@@ -53,6 +56,10 @@ want.
 | Safe singleton v1.4.1 | `0x41675C099F32341bf84BFc5382aF534df5C7461a` | safe-global/safe-deployments, via KeeperHub `lib/safe/contracts.ts` at commit `f8c8f18c754ccbca481774a1c3c0fdf71e282e96` | `VERSION()` → `"1.4.1"` on 8453 and 84532; 23579 bytes |
 | Safe L2 singleton v1.4.1 | `0x29fcB43b46531BcA003ddC8FCB67FFE91900C762` | same | `VERSION()` → `"1.4.1"` on both; 24421 bytes |
 | Safe proxy factory v1.4.1 | `0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67` | same | `eth_getCode` 3054 bytes on both |
+| Safe compatibility fallback handler v1.4.1 | `0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99` | safe-global/safe-deployments `src/assets/v1.4.1/compatibility_fallback_handler.json`, commit `7b1fb6d615ab2d2999550ec9166554b180e813e5` — `canonical` on 8453 and 84532 | used in `setup`; a Safe deployed with it answered `VERSION()` and executed owner transactions on the fork |
+| Safe v1.4.1 ABI (49 entries) | committed at `packages/remit-core/src/chain/abi/safe.ts` | same repo, `safe_l2.json`, same commit | exercised: `setup`, `getTransactionHash`, `approveHash`, `execTransaction`, `enableModule`, `isModuleEnabled`, `getOwners`, `getThreshold`, `nonce` |
+| Safe proxy factory ABI | `packages/remit-core/src/chain/abi/safe-proxy-factory.ts` | same repo, `safe_proxy_factory.json`, same commit | `createProxyWithNonce` deployed a Safe and emitted `ProxyCreation` |
+| `setup` initializer | `setup(address[],uint256,address,bytes,address,address,uint256,address)` | same ABI | 2-of-3 Safe deployed with `to = 0`, `data = 0x`, no payment |
 
 Use the **L2 singleton** on Base and Base Sepolia.
 
@@ -123,8 +130,39 @@ PRD.md §7 that nothing today links a transaction back to a strategy version.
 
 ---
 
+## 7. Roles behaviour, observed
+
+Read off a local Anvil fork of Base Sepolia on 2026-09-14, by
+`pnpm --filter ops p1 --network anvil`. Forked real state, real contracts, real reverts
+(CLAUDE.md §2.1) — not a testnet transaction, which still needs funded keys (OQ-6).
+
+| Behaviour | Observed |
+|---|---|
+| A `supply` inside the preset | executes; the Safe's USDC balance falls and the aTokens land on the Safe |
+| A `withdraw` with `to` = the Safe | executes |
+| A `withdraw` with `to` = anyone else | `ConditionViolation` → **ParameterNotAllowed**, free |
+| `USDC.transfer` — a function never scoped | `ConditionViolation` → **FunctionNotAllowed**, `info` carries the selector `0xa9059cbb` |
+| A scoped call sent to an unscoped target | `ConditionViolation` → **TargetAddressNotAllowed**, free |
+| The same refused call, forced on chain | reverts, ~67k gas, nothing moves |
+| A stranger calling `execTransactionWithRole` | `NotAuthorized(address)` — the `moduleOnly` guard, before any role check |
+| The agent after `assignRoles(..., false)` | `NoMembership()` |
+| Membership, read back | Roles 2.1.0 exposes **no getter** for the members mapping. It is observed by simulating a call and reading the error: `NotAuthorized` or `NoMembership` means no, anything else means yes. `isModuleEnabled` is not a substitute — revoking a role does not disable the module |
+
+Two traps worth writing down, both cost time on 2026-09-14:
+
+- **`owners.map(getAddress)` is a bug.** `Array.prototype.map` passes the index as the
+  second argument, and viem's second parameter is a chainId that switches the function to
+  EIP-1191 checksumming. The result fails viem's own address validation. Always
+  `map((x) => getAddress(x))`.
+- **Gas estimation swallows the revert you are trying to demonstrate.** A call that is
+  meant to fail has to be sent with an explicit gas limit, or the client throws during
+  estimation and nothing ever reaches the chain.
+
+---
+
 ## Re-verification log
 
 | Date | What | Result |
 |---|---|---|
 | 2026-09-13 | Full P0 pass: 24 chain assertions across 8453 and 84532 | all pass |
+| 2026-09-14 | P1 on a fork of Base Sepolia: Safe + Roles deployed, preset applied, 3 executions, 3 free refusals, 1 on-chain revert, kill switch pulled and restored | 15/15 steps, four consecutive clean runs |

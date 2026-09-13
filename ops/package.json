@@ -1,0 +1,26 @@
+{
+  "name": "ops",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "type-check": "tsc -p tsconfig.json",
+    "safe:deploy": "tsx src/scripts/deploy-safe.ts",
+    "roles:deploy": "tsx src/scripts/deploy-roles.ts",
+    "roles:build": "tsx src/scripts/roles-build.ts",
+    "roles:apply": "tsx src/scripts/roles-apply.ts",
+    "role:assign": "tsx src/scripts/assign-role.ts",
+    "status": "tsx src/scripts/status.ts",
+    "fund": "tsx src/scripts/fund.ts",
+    "exec": "tsx src/scripts/exec.ts",
+    "p1": "tsx src/scripts/p1.ts"
+  },
+  "dependencies": {
+    "@remit/core": "workspace:*",
+    "viem": "2.56.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.5.1",
+    "tsx": "4.23.13"
+  }
+}

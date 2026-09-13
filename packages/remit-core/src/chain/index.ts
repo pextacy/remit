@@ -1,5 +1,10 @@
 export { aavePoolAbi } from "./abi/aave-pool.js";
 export { erc20Abi } from "./abi/erc20.js";
+export { moduleProxyFactoryAbi } from "./abi/module-proxy-factory.js";
 export { rolesAbi } from "./abi/roles.js";
+export { safeAbi } from "./abi/safe.js";
+export { safeProxyFactoryAbi } from "./abi/safe-proxy-factory.js";
 export * from "./addresses.js";
+export * from "./decode-revert.js";
+export * from "./roles-enums.js";
 export * from "./roles-status.js";

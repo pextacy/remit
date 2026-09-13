@@ -14,3 +14,6 @@ __pycache__/
 !.env.example
 
 .DS_Store
+
+# Fork deployments are regenerated on every run; a real one is evidence and is committed.
+ops/deployments/anvil.json
