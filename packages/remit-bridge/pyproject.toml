@@ -1,0 +1,37 @@
+[project]
+name = "remit-bridge"
+version = "0.0.0"
+description = "Remit bridge — Almanak execution seam, KeeperHub client, provenance receipts"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Pinned exactly: the adapter is written against the installed source of this
+    # version, read under .venv, not against a remembered API (CLAUDE.md §8).
+    "almanak==2.28.0",
+    "pydantic>=2.9,<3",
+    "httpx>=0.27,<1",
+]
+
+# [project.scripts] is added in P3 with the CLI itself (`remit issue|serve|verify|revoke`).
+# Declaring an entry point that resolves to nothing installs a command that crashes.
+
+[dependency-groups]
+dev = ["ruff==0.15.1"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/remit_bridge"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 90
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "T20", "RET", "SIM", "ARG", "PTH"]
+
+[tool.ruff.lint.per-file-ignores]
+# The CLI is the one place that is allowed to print to an operator.
+"src/remit_bridge/cli.py" = ["T20"]

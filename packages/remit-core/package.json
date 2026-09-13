@@ -1,0 +1,29 @@
+{
+  "name": "@remit/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.check.json",
+    "verify:constants": "tsx scripts/verify-constants.ts"
+  },
+  "dependencies": {
+    "viem": "2.56.5",
+    "zod": "4.6.4"
+  },
+  "devDependencies": {
+    "@types/node": "26.5.1"
+  }
+}

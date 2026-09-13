@@ -1,0 +1,20 @@
+{
+  "name": "remit",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "type-check": "pnpm -r --if-present type-check",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "test": "pnpm -r --if-present test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.13",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3"
+  }
+}

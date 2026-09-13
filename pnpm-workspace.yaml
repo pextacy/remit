@@ -1,0 +1,4 @@
+packages:
+  - "packages/*"
+# `ops` joins the workspace in P4, when it has scripts to run (PLAN.md 2.6).
+# An entry here without a package.json breaks `pnpm install` for everyone.

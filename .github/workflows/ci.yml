@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r --if-present type-check
+      - run: pnpm lint
+      # `test` is a no-op until P2 lands the first suite (PLAN.md 1.6). It stays
+      # in the pipeline so the suite runs from the commit that introduces it.
+      - run: pnpm -r --if-present test
+
+  python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/remit-bridge
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --all-groups
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # A committed key invalidates the submission (CLAUDE.md §2.4), and finding
+      # it on Friday morning is too late. Cheap, so it runs on every push.
+      - name: No .env, no key material in the tree
+        run: |
+          set -u
+          fail() { echo "::error::$1"; exit 1; }
+
+          git ls-files --error-unmatch .env >/dev/null 2>&1 \
+            && fail ".env is tracked"
+
+          git grep -nIE -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+            && fail "PEM private key in the tree"
+
+          # A bare 32-byte hex string is not enough to go on: a roleKey, a
+          # limitsHash and a private key are the same shape. Flag it only when
+          # the line also names a secret.
+          git grep -nIE \
+            -e '(PRIVATE_KEY|MNEMONIC|SEED_PHRASE|API_KEY|SECRET|TOKEN)[A-Z_]*["'"'"']?\s*[:=]\s*["'"'"']?(0x)?[A-Za-z0-9_/+-]{16}' \
+            -- . ':!.env.example' ':!docs' ':!*.lock' ':!pnpm-lock.yaml' \
+            && fail "possible credential assigned in the tree"
+
+          echo "clean"
