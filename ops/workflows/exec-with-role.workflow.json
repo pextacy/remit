@@ -1,0 +1,30 @@
+{
+  "name": "remit-exec-with-role",
+  "version": "1",
+  "description": "Read the Safe's state, preflight the call against the Roles Modifier, execute it through execTransactionWithRole, notify the operator channel.",
+  "chain": "base",
+  "nodes": [
+    {
+      "step": "read_state",
+      "purpose": "Read the Safe's balance, the Roles instance and the agent's membership, so the run is decided on current state rather than on what the strategy believed."
+    },
+    {
+      "step": "policy_check",
+      "purpose": "eth_call execTransactionWithRole with shouldRevert=true. Returns a named Status on refusal. This is G2: no gas is spent whatever the answer."
+    },
+    {
+      "step": "exec_with_role",
+      "purpose": "Submit execTransactionWithRole. The only path by which value leaves the Safe. Retries and private routing are enabled on the workflow, not in our code."
+    },
+    {
+      "step": "notify",
+      "purpose": "Post the outcome and the transaction hash to the operator channel."
+    }
+  ],
+  "inputs": ["safe", "rolesModifier", "roleKey", "target", "value", "data", "operation"],
+  "notes": [
+    "This document is Remit's declaration of what must run. It is authored here and hashed into the Remit as workflowHash.",
+    "It is NOT KeeperHub's serialisation of a registered workflow: that shape cannot be verified without an account, which is docs/OPEN_QUESTIONS.md OQ-1.",
+    "P3 registers this workflow, records the id KeeperHub assigns, and reconciles the two. If KeeperHub's canonical definition differs, the Remit is reissued against the registered hash — a Remit is cheap, a wrong binding is not."
+  ]
+}

@@ -17,3 +17,5 @@ __pycache__/
 
 # Fork deployments are regenerated on every run; a real one is evidence and is committed.
 ops/deployments/anvil.json
+ops/deployments/*.ledger.json
+ops/remits/anvil.json

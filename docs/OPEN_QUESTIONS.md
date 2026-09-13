@@ -61,6 +61,22 @@ PLAN.md 0.1 is unstarted and needs a human: register the project, join the Keepe
 Discord, find the office-hours schedule, introduce the project in the builder channel.
 Nothing in the build is blocked by this, but the submission is.
 
+### OQ-7 — `workflowHash` binds a document KeeperHub has not seen
+
+A Remit binds `workflowHash`, the hash of the workflow definition that is allowed to run.
+P2 needs a real document to hash, and OQ-1 means the registered shape cannot be checked,
+so `ops/workflows/exec-with-role.workflow.json` is **our own declaration** of what must
+run: four steps, their purposes, and the inputs they take. It is hashed with the canonical
+serialiser, so reformatting it does not change the binding.
+
+What P3 has to do about it: register the workflow, record the id KeeperHub assigns, and
+compare its canonical definition with this file. If they differ — and they probably will,
+because KeeperHub's node schema is its own — the Remit is reissued against the registered
+hash. A Remit is cheap; a binding that points at a document nobody executes is not.
+
+Until then, treat `workflowHash` in any committed Remit as provisional, and do not put one
+in front of a judge as evidence of what ran.
+
 ---
 
 ## Premise failures found by P0

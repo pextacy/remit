@@ -160,9 +160,69 @@ Two traps worth writing down, both cost time on 2026-09-14:
 
 ---
 
+## 8. The Remit, reproduced
+
+Issued on 2026-09-14 against the fork deployment, by `pnpm --filter ops remit:issue`, and
+re-derived three independent ways by `pnpm --filter ops remit:verify-digest`.
+
+| Check | Method | Result |
+|---|---|---|
+| `limitsHash` | canonical JSON → keccak256, recomputed from the file on disk | matches the value inside the Remit |
+| Canonical JSON is order-independent | same document with its keys reversed, re-hashed | identical hash |
+| `remitHash` | viem `hashTypedData` | — |
+| `remitHash` | foundry `cast`, built from the EIP-712 definition with no shared code | identical |
+| `remitHash` | the value written into `ops/remits/<network>.json` when it was issued | identical |
+
+The type string that is hashed, which anyone can check with `cast keccak`:
+
+```
+Remit(bytes32 strategyHash,bytes32 workflowHash,address safe,address rolesModifier,bytes32 roleKey,bytes32 limitsHash,uint256 chainId,uint64 notBefore,uint64 notAfter,uint256 nonce)
+→ typeHash 0x948389bed2538200ce0f7cb0adabe422e2dd55bf8b1f9c39b9adb108ea26b16e
+```
+
+`strategyHash` on that run was keccak256 of a real file — the `metamorpho_base_yield`
+strategy shipped inside `almanak==2.28.0` — not a placeholder. `workflowHash` is keccak256
+of the canonicalised `ops/workflows/exec-with-role.workflow.json`, which is our own
+declaration of what must run and is reconciled with the registered workflow in P3 (OQ-7).
+
+## 9. G1, observed
+
+`pnpm --filter ops g1 --network anvil` runs the gate over 19 intents. Every error code in
+the union is reached, and each refusal names the field, what the Remit allows and what the
+intent asked for.
+
+| Intent | Outcome |
+|---|---|
+| supply 5 USDC to the Safe | passes, flagged for G3 review (above 1 USD) |
+| supply 0.50 USDC | passes, no review |
+| withdraw 2 USDC to the Safe | passes; the daily cap is untouched — withdrawals come home |
+| an intent carrying a `data` field | `INTENT_MALFORMED` — the schema is `.strict()`, so an unknown key is a refusal rather than a field that is quietly ignored |
+| an asset named by address | `INTENT_MALFORMED` — assets are symbols, so a strategy cannot name a token nobody verified |
+| an amount as a float | `INTENT_MALFORMED` |
+| withdraw or supply to an attacker | `OUT_OF_REMIT_RECIPIENT` |
+| approve an attacker as spender | `OUT_OF_REMIT_SPENDER` — checked against the venue list, not the recipient list |
+| a kind, venue or function the Remit omits | `OUT_OF_REMIT_KIND` / `_TARGET` / `_SELECTOR` |
+| 6 USDC against a 5 USDC cap | `REMIT_CAP_EXCEEDED_PER_TX` |
+| 5 USDC with 25 already supplied today | `REMIT_CAP_EXCEEDED_DAILY` |
+| the seventh action in an hour | `REMIT_RATE_LIMIT_EXCEEDED` |
+| before `notBefore` / after `notAfter` | `REMIT_NOT_YET_VALID` / `REMIT_EXPIRED` |
+| a testnet Remit used on mainnet | `REMIT_CHAIN_MISMATCH` |
+| limits widened after issue, hash left alone | `REMIT_LIMITS_MISMATCH` |
+
+Observed end to end with `pnpm --filter ops propose`, which runs G1 then G2 then the
+chain: three approve/supply cycles executed, and the fourth was refused at G1 by the
+hourly rate limit, across separate processes — the ledger is on disk, so the cap survives
+a restart (G1-5).
+
+G2 also refuses for reasons that are nothing to do with policy: with the ERC-20 allowance
+exhausted, the preflight returned `ModuleTransactionFailed()` before any gas was spent.
+
+---
+
 ## Re-verification log
 
 | Date | What | Result |
 |---|---|---|
 | 2026-09-13 | Full P0 pass: 24 chain assertions across 8453 and 84532 | all pass |
+| 2026-09-14 | P2: Remit issued and re-derived by viem, foundry and the committed file; G1 run over 19 intents covering every error code | all agree, 19/19 |
 | 2026-09-14 | P1 on a fork of Base Sepolia: Safe + Roles deployed, preset applied, 3 executions, 3 free refusals, 1 on-chain revert, kill switch pulled and restored | 15/15 steps, four consecutive clean runs |

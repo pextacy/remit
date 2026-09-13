@@ -42,6 +42,37 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
 
+  calldata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # CLAUDE.md §2.3 is the thesis of the project, so it is enforced mechanically
+      # rather than by review. An intent carries a kind, an asset symbol, a decimal
+      # amount and one counterparty address. The moment it can carry bytes, a selector
+      # or a target, model output reaches calldata and every gate downstream is theatre.
+      - name: An intent cannot carry calldata
+        run: |
+          set -u
+          # `to` is deliberately absent from this list: on a withdraw it names a
+          # recipient, which G1 checks against allowedRecipients. The danger is a field
+          # that names *what to call* or *what bytes to send*.
+          if grep -nE '\b(data|calldata|abi|selector|signature|target|bytecode|payload)\s*:' \
+               packages/remit-core/src/schema/intent.ts; then
+            echo "::error::intent schema gained a field that can carry calldata"; exit 1
+          fi
+          # No free-form strings either: every field is one of the checked primitives,
+          # so there is nowhere for an unvalidated value to sit.
+          if grep -nE 'z\.(string|any|unknown|record)\(' \
+               packages/remit-core/src/schema/intent.ts; then
+            echo "::error::intent schema gained an unconstrained field"; exit 1
+          fi
+          # Bytes are built in exactly one place, from ABIs that were verified on chain.
+          builders=$(grep -rl 'encodeFunctionData' packages/remit-core/src | grep -v 'src/compile/' || true)
+          if [ -n "$builders" ]; then
+            echo "::error::calldata is built outside src/compile: $builders"; exit 1
+          fi
+          echo "clean"
+
   secrets:
     runs-on: ubuntu-latest
     steps:

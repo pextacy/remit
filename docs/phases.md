@@ -138,6 +138,32 @@ and `checkEnvelope` as a pure function with typed discriminated-union errors car
 
 **Closes** RM-1, RM-2, RM-3, G1-1, G1-2, G1-3, G1-4.
 
+**Status — 2026-09-14: complete.**
+
+| Task | State |
+|---|---|
+| 1.6 Remit type, canonical JSON, `limitsHash`, EIP-712, `remitDigest` | done — `remitHash` re-derived by viem, by foundry's `cast` from the EIP-712 definition, and from the committed file: three paths, one value |
+| 1.7 `Intent` union, Zod schemas, `checkEnvelope` (G1), typed errors | done — 19 intents through the gate, every error code in the union reached, each refusal naming field, expected and actual |
+
+Reproducibility is the requirement, so it is checked the only way that means anything:
+canonical JSON hashes the same with the keys reversed, and a second library agrees with
+the first. `strategyHash` on the issued Remit is keccak256 of a real file — the
+`metamorpho_base_yield` strategy inside `almanak==2.28.0`. `workflowHash` is provisional
+until P3 registers the workflow (OQ-7).
+
+Two decisions worth carrying forward:
+
+- **A spender is not a recipient.** `approve` names who may pull value and is checked
+  against the venue list; `supply`/`withdraw` name where value lands and are checked
+  against the recipient list. One list for both would let an approve to an attacker pass
+  any allowlist that contains the Safe — which every allowlist does.
+- **Withdrawals do not consume the daily cap.** Their recipient is pinned to the Safe, so
+  they cannot be a way out, and charging them would tighten the cap as the agent unwinds.
+
+`pnpm --filter ops propose` now runs G1 → G2 → chain over the issued Remit, with the spend
+ledger on disk between runs. Three approve/supply cycles executed; the fourth was refused
+at G1 by the hourly rate limit, in a separate process.
+
 **Exit gate**
 - `pnpm -r test` green, including hash-reproducibility tests: the same documents produce
   the same `remitHash` and `limitsHash` on a second machine.

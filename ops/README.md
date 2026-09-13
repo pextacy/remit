@@ -48,6 +48,33 @@ pnpm --filter ops role:assign --network base-sepolia --revoke
 Addresses land in `ops/deployments/<network>.json`. The fork file is gitignored because it
 is regenerated on every run; a real deployment is evidence and is committed.
 
+## The Remit, and the gates in front of it
+
+```bash
+# issue one — both hashes come from real files, there is no placeholder
+pnpm --filter ops remit:issue --network anvil \
+  --strategy path/to/strategy.py \
+  --workflow ops/workflows/exec-with-role.workflow.json
+
+# re-derive remitHash with foundry, independently of viem
+pnpm --filter ops remit:verify-digest --network anvil
+
+# run G1 over every refusal it knows how to make
+pnpm --filter ops g1 --network anvil
+
+# an intent, through G1 → G2 → the chain
+pnpm --filter ops propose --network anvil --kind supply   --amount 5
+pnpm --filter ops propose --network anvil --kind withdraw --amount 2 --to 0x…
+```
+
+`propose` is the shape the bridge takes in P3, minus KeeperHub: the two gates in front of
+execution do not change when the last step stops being a direct send. A G1 refusal makes
+no network call at all; a G2 refusal costs one `eth_call` and no gas.
+
+The rolling spend ledger lives at `ops/deployments/<network>.ledger.json` and is appended
+only when value actually moved — a cap consumed by a call that spent nothing would tighten
+every time the chain said no.
+
 ## Rules that predate the code
 
 - **Base Sepolia is the default.** `--network base` additionally requires `--confirm`, and
