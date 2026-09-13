@@ -56,6 +56,23 @@ and the pinned `gnosisguild/zodiac-modifier-roles` commit with `execTransactionW
 
 **Closes** the preconditions of `CLAUDE.md` §2.2.
 
+**Status — 2026-09-13: closed, with two tasks blocked on credentials.**
+
+| Task | State |
+|---|---|
+| 0.1 DoraHacks, Discord, office hours | **blocked** — needs a human with an account (OQ-2) |
+| 0.2 KeeperHub account, key, MCP, one hand-run workflow | **blocked** — no account yet (OQ-1) |
+| 0.3 KeeperHub API surface | verified from the repo at commit `f8c8f18c`; live confirmation pending OQ-1 |
+| 0.4 Almanak SDK at a pinned version, execution seam | done — `almanak==2.28.0`, gRPC `ExecutionService`, **AL-2 GO** |
+| 0.5 Addresses on Base and Base Sepolia | done — 24 assertions, both chains, re-runnable |
+| 0.6 Roles v2 at a pinned tag | done — mastercopy **2.1.0**, full ABI and `Status` enum committed |
+| 0.7 Issues #1241/#1784, CONTRIBUTING, plugin conventions | read and recorded. `pnpm create-plugin` deliberately not run — see OQ-3, the bounty premise needs a decision first |
+| 0.8 Monorepo scaffold, CI | done — type-check, lint and ruff green locally; the workflow itself is unproven until a remote exists |
+
+The go/no-go this phase existed for came out **GO on AL-2** and turned up three stale
+premises in `PRD.md` instead (OQ-3 … OQ-5). The bounty track, not the Almanak adapter, is
+the thing that now needs a decision.
+
 **Exit gate**
 - One trivial KeeperHub workflow executed by hand, returning a real `executionId`.
 - `docs/VERIFIED.md` has a dated, sourced row for every address, ABI and path the build
