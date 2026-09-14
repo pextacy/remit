@@ -13,7 +13,7 @@ import { describePreset, encodePreset } from "../roles/encode.js";
 import { buildPreset } from "../roles/preset.js";
 
 const args = parseArgs();
-const network = networkFrom(args);
+const network = networkFrom(args, { readOnly: true });
 const deployment = requireDeployment(network.name);
 const safe = requireField(deployment, "safe");
 const roleKey = requireField(deployment, "roleKey");

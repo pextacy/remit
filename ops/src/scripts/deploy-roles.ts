@@ -31,7 +31,12 @@ const safe = requireField(deployment, "safe");
 const roleKey = stringToHex(option(args, "role") ?? "remit-agent", { size: 32 }) as Hex;
 const salt = BigInt(keccak256(toHex(option(args, "salt") ?? "remit-p1")));
 
-const { rolesModifier } = await deployRolesModifier(network, cast.deployer, safe, salt);
+const { rolesModifier, block } = await deployRolesModifier(
+  network,
+  cast.deployer,
+  safe,
+  salt,
+);
 await enableModule(network, safe, cast.signingOwners, rolesModifier);
 await assignRole(
   network,
@@ -56,6 +61,7 @@ writeDeployment({
   network: network.name,
   chainId: network.chainId,
   rolesModifier,
+  rolesDeployedBlock: Number(block),
   roleKey,
   agentSigner: cast.agent.address,
   updatedAt: new Date().toISOString(),

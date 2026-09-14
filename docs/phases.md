@@ -231,6 +231,31 @@ prints the exact permission delta before anything is applied — mandatory befor
 
 **Closes** the operational half of NH-4, and the `CLAUDE.md` §2.4 mainnet path.
 
+**Status — 2026-09-14: complete.**
+
+| Task | State |
+|---|---|
+| 2.6 `roles:build`, `roles:diff`, `roles:apply`, `kill` | done. `roles:diff` reconstructs the role by replaying the Roles Modifier's own events — there is no getter for a role's scope, and `ScopeFunction` carries the whole condition tree in the log |
+| 2.7 Kill switch verified | done — pulled, preflight observed to fail with `NoMembership()`, restored, with a receipt for every state |
+
+`roles:diff` proved itself both ways: zero differences immediately after an apply, and an
+exact `+ withdraw(…) [WIDENS AUTHORITY]` after the function was revoked on chain by hand.
+With `withdraw` revoked, a withdraw intent passed G1 and was refused at G2 with
+`FunctionNotAllowed` — the preset-tightened-after-the-Remit case (NH-2), reached without
+editing a thing.
+
+`roles:apply` now runs the diff first, refuses when there is nothing to do, and on mainnet
+refuses a widening without `--yes`. Read-only scripts (`roles:diff`, `roles:build`,
+`status`, `g1`) are exempt from `--confirm`: making an operator type it to *look* at
+something teaches them to type it without reading, which is the habit the flag exists to
+prevent.
+
+`exec:mainnet` is the awkward path CLAUDE.md §2.4 asks for. Four separate acts of intent
+before anything is sent: the network named, `--confirm`, the Remit named **by hash** and
+matched against the issued document, and the decoded action — Safe, roleKey, value,
+recipient, caps, headroom — printed first. It runs the same pipeline as `propose`, because
+a mainnet path with its own copy of the gates is a mainnet path nobody has rehearsed.
+
 **Exit gate**
 - `roles:diff` output is read and understood by a team member who did not write the preset.
 - The kill switch is pulled, G2 is observed to fail, membership is restored — with a

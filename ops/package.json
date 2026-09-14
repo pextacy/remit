@@ -8,8 +8,11 @@
     "safe:deploy": "tsx src/scripts/deploy-safe.ts",
     "roles:deploy": "tsx src/scripts/deploy-roles.ts",
     "roles:build": "tsx src/scripts/roles-build.ts",
+    "roles:diff": "tsx src/scripts/roles-diff.ts",
     "roles:apply": "tsx src/scripts/roles-apply.ts",
+    "roles:revoke": "tsx src/scripts/roles-revoke.ts",
     "role:assign": "tsx src/scripts/assign-role.ts",
+    "kill": "tsx src/scripts/kill.ts",
     "status": "tsx src/scripts/status.ts",
     "remit:issue": "tsx src/scripts/remit-issue.ts",
     "remit:verify-digest": "tsx src/scripts/verify-digest.ts",
@@ -17,6 +20,7 @@
     "propose": "tsx src/scripts/propose.ts",
     "fund": "tsx src/scripts/fund.ts",
     "exec": "tsx src/scripts/exec.ts",
+    "exec:mainnet": "tsx src/scripts/execute-mainnet.ts",
     "p1": "tsx src/scripts/p1.ts"
   },
   "dependencies": {

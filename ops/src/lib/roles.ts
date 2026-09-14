@@ -49,7 +49,7 @@ export async function deployRolesModifier(
   deployer: Sender,
   safe: Address,
   saltNonce: bigint,
-): Promise<{ rolesModifier: Address; txHash: Hash }> {
+): Promise<{ rolesModifier: Address; txHash: Hash; block: bigint }> {
   const txHash = await send(
     network,
     deployer,
@@ -76,8 +76,13 @@ export async function deployRolesModifier(
   }
 
   const rolesModifier = getAddress(creation.args.proxy);
-  logEvent("roles.deployed", { rolesModifier, safe, txHash });
-  return { rolesModifier, txHash };
+  logEvent("roles.deployed", {
+    rolesModifier,
+    safe,
+    txHash,
+    block: receipt.blockNumber.toString(),
+  });
+  return { rolesModifier, txHash, block: receipt.blockNumber };
 }
 
 /** Enable the Roles instance as a Safe module. Owner transaction. */

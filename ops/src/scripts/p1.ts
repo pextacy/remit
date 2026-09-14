@@ -105,7 +105,12 @@ const { safe } = await deploySafe(network, cast.deployer, {
 record("1.1 safe", "deployed", safe);
 
 // ---- 1.2 Roles, enabled, with the agent in the role ------------------------
-const { rolesModifier } = await deployRolesModifier(network, cast.deployer, safe, salt);
+const { rolesModifier, block } = await deployRolesModifier(
+  network,
+  cast.deployer,
+  safe,
+  salt,
+);
 await enableModule(network, safe, cast.signingOwners, rolesModifier);
 await assignRole(
   network,
@@ -323,6 +328,7 @@ writeDeployment({
   owners: cast.ownerAddresses,
   threshold: 2,
   rolesModifier,
+  rolesDeployedBlock: Number(block),
   roleKey,
   agentSigner: cast.agent.address,
   presetAppliedAt: new Date().toISOString(),

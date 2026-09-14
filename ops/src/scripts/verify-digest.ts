@@ -58,7 +58,7 @@ function abiEncode(signature: string, args: readonly string[]): Hex {
 }
 
 const args = parseArgs();
-const network = networkFrom(args);
+const network = networkFrom(args, { readOnly: true });
 
 const bundlePath = join(REPO, "ops", "remits", `${network.name}.json`);
 let raw: unknown;

@@ -20,6 +20,8 @@ export type Deployment = {
   owners?: readonly Address[];
   threshold?: number;
   rolesModifier?: Address;
+  /** The block the Roles instance was deployed in — where `roles:diff` starts replaying. */
+  rolesDeployedBlock?: number;
   roleKey?: Hex;
   agentSigner?: Address;
   presetAppliedAt?: string;

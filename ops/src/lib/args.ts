@@ -44,14 +44,21 @@ export function requireOption(args: Args, key: string): string {
   return value;
 }
 
-/** Resolve the network and enforce the mainnet guard in one place. */
-export function networkFrom(args: Args): Network {
+/**
+ * Resolve the network and enforce the mainnet guard in one place.
+ *
+ * `readOnly` exempts a script that cannot change anything. A diff or a status read
+ * against mainnet is exactly what an operator should be able to run without ceremony,
+ * and making them type `--confirm` to *look* at something teaches them to type
+ * `--confirm` without reading — which is the habit the flag exists to prevent.
+ */
+export function networkFrom(args: Args, options: { readOnly?: boolean } = {}): Network {
   const network = resolveNetwork(args.options.get("network") ?? "base-sepolia");
 
-  if (network.isMainnet && !args.flags.has("confirm")) {
+  if (network.isMainnet && options.readOnly !== true && !args.flags.has("confirm")) {
     fail("--network base moves real money: re-run with --confirm");
   }
-  if (network.isMainnet) {
+  if (network.isMainnet && options.readOnly !== true) {
     say("⚠️  BASE MAINNET. Real funds. Caps: 5 USDC per transaction, 25 USDC per day.");
   }
 

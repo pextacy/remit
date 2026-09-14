@@ -18,7 +18,7 @@ import { logEvent, say } from "../lib/log.js";
 import { isEnabledOnRoles, isRoleMember } from "../lib/roles.js";
 
 const args = parseArgs();
-const network = networkFrom(args);
+const network = networkFrom(args, { readOnly: true });
 const deployment = requireDeployment(network.name);
 const safe = requireField(deployment, "safe");
 const rolesModifier = requireField(deployment, "rolesModifier");

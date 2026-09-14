@@ -64,6 +64,12 @@ export const receiptOutcomeSchema = z.enum([
   "reverted_g4",
   /** The transaction may exist; we could not prove which one it was. Never guessed. */
   "unresolved",
+  /**
+   * Nothing was proposed: this record is a reading of what the chain would have said.
+   * The kill switch writes two of these, before and after, so the transition is in the
+   * chain rather than in a screenshot (PRD.md NH-4).
+   */
+  "observed",
 ]);
 
 export type ReceiptOutcome = z.infer<typeof receiptOutcomeSchema>;

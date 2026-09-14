@@ -26,7 +26,8 @@ testnet transaction hash P1's exit gate asks for — that needs funded keys, see
 pnpm --filter ops safe:deploy   --network base-sepolia
 pnpm --filter ops roles:deploy  --network base-sepolia
 pnpm --filter ops roles:build   --network base-sepolia   # print it, and read it
-pnpm --filter ops roles:apply   --network base-sepolia
+pnpm --filter ops roles:diff    --network base-sepolia   # what would change, and what widens
+pnpm --filter ops roles:apply   --network base-sepolia   # runs the diff first, always
 pnpm --filter ops status        --network base-sepolia
 
 pnpm --filter ops run exec --network base-sepolia --action approve  --amount 50
@@ -39,9 +40,32 @@ pnpm --filter ops run exec --network base-sepolia --action transfer --amount 10
 pnpm --filter ops run exec --network base-sepolia --action supply --amount 10 --target 0x…
 pnpm --filter ops run exec --network base-sepolia --action withdraw --amount 10 --violate --force
 
-# the kill switch
-pnpm --filter ops role:assign --network base-sepolia --revoke
+# narrow one thing without switching the agent off
+pnpm --filter ops roles:revoke --network base-sepolia \
+  --function "withdraw(address,uint256,address)" --on 0x…
+
+# the kill switch: one owner transaction, with a receipt for the state either side
+pnpm --filter ops kill --network base-sepolia
+pnpm --filter ops kill --network base-sepolia --restore
 ```
+
+## Mainnet
+
+```bash
+pnpm --filter ops exec:mainnet --network base \
+  --remit 0x… --kind supply --amount 5 --confirm
+```
+
+Four separate acts of intent before anything is sent: the network named explicitly,
+`--confirm`, the Remit named **by hash** and checked against the document issued for this
+deployment, and the decoded action — Safe, roleKey, value, recipient, caps, headroom —
+printed in front of you first. It runs the same pipeline as `propose`; a mainnet path with
+its own copy of the gates is a mainnet path nobody has rehearsed, so rehearse it with
+`--network anvil`, flags and all.
+
+Read-only scripts (`roles:diff`, `roles:build`, `status`, `g1`) do not need `--confirm` on
+mainnet. Making an operator type it to *look* at something teaches them to type it without
+reading.
 
 `exec` needs `pnpm run exec` rather than bare `pnpm exec`, which pnpm reserves for itself.
 
@@ -91,9 +115,11 @@ bridge's (`remit run`), which stops rather than falling back when there is no AP
 - **Base Sepolia is the default.** `--network base` additionally requires `--confirm`, and
   says out loud that it is about to move real money. There is no path that reaches mainnet
   by accident.
-- **Print the preset before applying it.** `roles:diff` in P4 turns that into a real diff
-  against what is already on chain; until then `roles:build` prints what is about to be
-  applied, and someone who did not write it reads it.
+- **Diff before apply.** `roles:apply` runs `roles:diff` itself and refuses when there is
+  nothing to do; on mainnet it refuses a widening without `--yes`. The diff is a real one:
+  it replays the Roles Modifier's own events to reconstruct what the chain currently says,
+  because Roles 2.1.0 exposes no getter for a role's scope. Someone who did not write the
+  preset reads the output.
 - **No key lives in the repository.** On a fork, addresses are impersonated and no key
   exists at all. On a real network the keys come from `.env`, which is gitignored, and the
   agent signer is a different variable from the owner keys — an agent key that is also an

@@ -274,11 +274,74 @@ the chain is honest; a plausible wrong hash is what an auditor finds instead of 
 
 ---
 
+## 12. Reading the preset back off the chain
+
+Roles 2.1.0 has **no getter** for a role's targets, functions or conditions. The state
+exists — `scopeConfig` is a mapping inside a struct — but nothing public reads it, and
+`eth_getStorageAt` against a packed mapping is the kind of cleverness that is wrong six
+months later without saying so.
+
+The contract does emit everything it does, and `ScopeFunction` carries the entire
+condition tree in the log:
+
+```
+ScopeTarget(bytes32 roleKey, address targetAddress)
+ScopeFunction(bytes32 roleKey, address targetAddress, bytes4 selector,
+              (uint8,uint8,uint8,bytes)[] conditions, uint8 options)
+AllowTarget / AllowFunction / RevokeTarget / RevokeFunction / AssignRoles
+```
+
+So `roles:diff` replays those events for the role and reconstructs it exactly, from the
+contract's own account of itself. That is what makes it a diff rather than a description
+of what is about to be sent.
+
+Observed on 2026-09-14, on a fork of Base Sepolia:
+
+| Situation | What `roles:diff` said |
+|---|---|
+| Roles deployed, no preset applied | two targets `+ … [WIDENS AUTHORITY]`, "not cleared on chain" |
+| Immediately after `roles:apply` | "no difference — the chain already says exactly what the preset says" |
+| After `roles:revoke --function withdraw(address,uint256,address)` | `+ withdraw(…) [WIDENS AUTHORITY] — not scoped on chain` |
+| After re-applying the preset | no difference again |
+
+With `withdraw` revoked on chain, a withdraw intent passed **G1** and was refused at
+**G2** with `FunctionNotAllowed`, the selector `0x69328dec` in `info`. That is the
+preset-tightened-after-the-Remit case (NH-2), reached without editing anything by hand.
+
+`roles:apply` now runs the diff first and refuses to do anything when there is nothing to
+do. On mainnet it additionally refuses to apply a widening without `--yes`.
+
+## 13. The kill switch
+
+`pnpm --filter ops kill` is one owner transaction calling
+`assignRoles(agent, [roleKey], [false])`. Observed:
+
+| | member | preflight |
+|---|---|---|
+| before | `true` | PASS — the Roles Modifier would allow it |
+| after | `false` | REFUSED — `NoMembership()` |
+| after `--restore` | `true` | PASS |
+
+Four receipts, `outcome: "observed"`, in the same chain as everything else — the
+transition is in the ledger rather than in a screenshot (NH-4). A supply proposed after
+the switch was pulled passed G1 and was refused at G2 with `NoMembership()`, and that
+refusal has a receipt too.
+
+The probe uses `approve`, not `supply`, because `supply` on an unfunded Safe fails inside
+Aave — a true answer to a different question. The probe distinguishes the two: a
+`ConditionViolation`, `NoMembership` or `NotAuthorized` means the role refused; a
+`ModuleTransactionFailed` means the role allowed the call and the call itself failed.
+Conflating them would make an unfunded Safe look like a revoked agent, and an operator
+checking the switch would be told what they wanted to hear.
+
+---
+
 ## Re-verification log
 
 | Date | What | Result |
 |---|---|---|
 | 2026-09-13 | Full P0 pass: 24 chain assertions across 8453 and 84532 | all pass |
+| 2026-09-14 | P4: `roles:diff` reconstructed the role from 11 events and matched the preset exactly; drift introduced and detected; kill switch pulled and restored with four receipts | diff exact, switch verified by preflight |
 | 2026-09-14 | P3: six receipts written by two programs over a fork, chain verified from Python through the TypeScript core, three tamper modes caught | chain intact, all tampers detected |
 | 2026-09-14 | P2: Remit issued and re-derived by viem, foundry and the committed file; G1 run over 19 intents covering every error code | all agree, 19/19 |
 | 2026-09-14 | P1 on a fork of Base Sepolia: Safe + Roles deployed, preset applied, 3 executions, 3 free refusals, 1 on-chain revert, kill switch pulled and restored | 15/15 steps, four consecutive clean runs |

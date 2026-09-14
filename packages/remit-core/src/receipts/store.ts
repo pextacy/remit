@@ -36,8 +36,16 @@ export class MissingChainError extends Error {
  * facts, and conflating them makes verification pass on a path typo — which is the one
  * failure a verifier must never have.
  */
-export function readChain(dir: string): readonly StoredReceipt[] {
-  if (!existsSync(dir)) throw new MissingChainError(dir);
+export function readChain(
+  dir: string,
+  options: { allowMissing?: boolean } = {},
+): readonly StoredReceipt[] {
+  if (!existsSync(dir)) {
+    // Appending to a chain that does not exist yet is the genesis case and must work.
+    // Verifying one that does not exist is a path typo, and must not.
+    if (options.allowMissing === true) return [];
+    throw new MissingChainError(dir);
+  }
 
   let names: string[];
   try {
@@ -56,7 +64,7 @@ export function readChain(dir: string): readonly StoredReceipt[] {
 }
 
 export function chainHead(dir: string): { sequence: number; prevHash: `0x${string}` } {
-  const stored = readChain(dir);
+  const stored = readChain(dir, { allowMissing: true });
   const last = stored.at(-1);
   if (last === undefined) return { sequence: 0, prevHash: GENESIS_PREV_HASH };
 
