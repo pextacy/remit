@@ -16,7 +16,10 @@ __pycache__/
 .DS_Store
 
 # Fork deployments are regenerated on every run; a real one is evidence and is committed.
+# `anvil-base` names a Safe on a fork of Base mainnet, which a reader could mistake for
+# the real thing — exactly the confusion a mainnet proof must never invite.
 ops/deployments/anvil.json
+ops/deployments/anvil-base.json
 ops/deployments/*.ledger.json
 ops/remits/anvil.json
 receipts/anvil/
