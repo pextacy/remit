@@ -17,6 +17,7 @@
     "mainnet:preflight": "tsx src/scripts/mainnet-preflight.ts",
     "submit:check": "tsx src/scripts/submit-check.ts",
     "remit:issue": "tsx src/scripts/remit-issue.ts",
+    "remit:sign": "tsx src/scripts/remit-sign.ts",
     "remit:verify-digest": "tsx src/scripts/verify-digest.ts",
     "g1": "tsx src/scripts/g1.ts",
     "nh": "tsx src/scripts/nh.ts",

@@ -44,8 +44,19 @@ export const reviewItemSchema = z
       .min(1),
     /** What remains of the daily cap if this is approved. */
     headroomUsd: z.string().min(1),
-    /** Why it stopped: the threshold it exceeded. */
+    /** Why it stopped: the threshold it exceeded, or a changed strategy version. */
     reason: z.string().min(1),
+    /**
+     * What the Safe's USDC balance would do, simulated against current state (G3-4).
+     *
+     * The check on whether the call does what its name says. Absent when the node cannot
+     * simulate asset changes — a review screen that invents a delta is worse than one
+     * that admits it does not have it.
+     */
+    balanceDelta: z
+      .object({ usdc: z.string().min(1), note: z.string().min(1) })
+      .strict()
+      .optional(),
   })
   .strict();
 

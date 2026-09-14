@@ -12,8 +12,10 @@
  */
 import type { Address, Hex, PublicClient } from "viem";
 import { getAddress, toFunctionSelector } from "viem";
+import { safeAbi } from "../chain/abi/safe.js";
 import type { SupportedChainId } from "../chain/addresses.js";
 import { Clearance } from "../chain/roles-enums.js";
+import { verifyRemitSignatures } from "../eip712/signatures.js";
 import { type Limits, limitsHash } from "../schema/limits.js";
 import type { Remit } from "../schema/remit.js";
 import { type Delta, diffRole } from "./diff.js";
@@ -27,7 +29,8 @@ export type DriftFinding = {
     | "REMIT_TARGET_NOT_SCOPED"
     | "REMIT_SELECTOR_NOT_SCOPED"
     | "REMIT_TARGET_OVER_CLEARED"
-    | "REMIT_AGENT_NOT_MEMBER";
+    | "REMIT_AGENT_NOT_MEMBER"
+    | "REMIT_SIGNATURES_INVALID";
   readonly detail: string;
 };
 
@@ -47,6 +50,14 @@ export type DriftInput = {
   readonly rolesModifier: Address;
   readonly agent: Address;
   readonly fromBlock?: bigint;
+  /**
+   * Owner signatures over the Remit, if it carries any (RM-5).
+   *
+   * Optional, because an unsigned Remit is still usable — the preset is the authority
+   * either way. But a Remit that carries signatures which do not verify is worse than an
+   * unsigned one: it claims an approval nobody gave.
+   */
+  readonly signatures?: readonly Hex[];
 };
 
 export async function checkPresetDrift(input: DriftInput): Promise<DriftCheck> {
@@ -122,6 +133,35 @@ export async function checkPresetDrift(input: DriftInput): Promise<DriftCheck> {
             "the Remit's recipient limits are not enforced by anything",
         });
       }
+    }
+  }
+
+  // 3b. If the Remit claims owner approval, that claim has to hold — against the Safe's
+  //     *current* owners, because owners change and a signature from a removed owner no
+  //     longer carries their authority.
+  if (input.signatures !== undefined && input.signatures.length > 0) {
+    const owners = (await input.client.readContract({
+      address: input.remit.safe,
+      abi: safeAbi,
+      functionName: "getOwners",
+    })) as readonly Address[];
+    const threshold = Number(
+      (await input.client.readContract({
+        address: input.remit.safe,
+        abi: safeAbi,
+        functionName: "getThreshold",
+      })) as bigint,
+    );
+
+    const check = await verifyRemitSignatures({
+      remit: input.remit,
+      signatures: input.signatures,
+      owners: [...owners],
+      threshold,
+    });
+
+    if (!check.ok) {
+      findings.push({ code: "REMIT_SIGNATURES_INVALID", detail: check.reason });
     }
   }
 

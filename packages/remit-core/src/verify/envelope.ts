@@ -47,6 +47,15 @@ export type EnvelopeInput = {
   readonly now: number;
   /** Everything G1 has already admitted. Empty is a valid starting state. */
   readonly ledger: readonly LedgerEntry[];
+  /**
+   * The `strategyHash` under which this agent last executed something (G3-5).
+   *
+   * When it differs from the one the Remit binds, the strategy has changed version since
+   * anybody last watched it act — so the next action is held for review whatever its
+   * size. A new version's first transaction is the one worth looking at, and it is
+   * exactly the one a notional threshold waves through.
+   */
+  readonly seenStrategyHash?: string;
 };
 
 export type EnvelopeDecision = {
@@ -55,8 +64,10 @@ export type EnvelopeDecision = {
   /** Notional in integer micro-dollars. */
   readonly usdMicros: bigint;
   readonly usd: string;
-  /** True when the action is above `requireReviewAboveUsd` and must pause at G3. */
+  /** True when the action must pause at G3. */
   readonly requiresReview: boolean;
+  /** Why it must pause. Undefined when it need not. */
+  readonly reviewReason: string | undefined;
   /** What is left of the daily cap after this action, in micro-dollars. */
   readonly headroomMicros: bigint;
   /** The ledger entry to append once the action is admitted. */
@@ -308,7 +319,11 @@ export function checkEnvelope(input: EnvelopeInput): EnvelopeResult {
     };
   }
 
-  const requiresReview = usdMicros > usdToMicros(limits.requireReviewAboveUsd);
+  const overThreshold = usdMicros > usdToMicros(limits.requireReviewAboveUsd);
+  const strategyChanged =
+    input.seenStrategyHash !== undefined &&
+    input.seenStrategyHash.toLowerCase() !== remit.strategyHash.toLowerCase();
+  const requiresReview = overThreshold || strategyChanged;
 
   return {
     ok: true,
@@ -318,6 +333,11 @@ export function checkEnvelope(input: EnvelopeInput): EnvelopeResult {
       usdMicros,
       usd: microsToUsd(usdMicros),
       requiresReview,
+      reviewReason: strategyChanged
+        ? "the strategy has changed version since this agent last executed"
+        : overThreshold
+          ? `above the Remit's review threshold of ${limits.requireReviewAboveUsd} USD`
+          : undefined,
       headroomMicros: dailyCap - (alreadySpent + wouldSpend),
       entry: { at: now, usdMicros: usdMicros.toString(), kind: intent.kind },
     },

@@ -56,6 +56,14 @@ export const remitBundleSchema = z
     strategySource: z.string().min(1).optional(),
     /** Filled in by P3: the workflow definition that `workflowHash` covers. */
     workflowSource: z.string().min(1).optional(),
+    /**
+     * Owner signatures over `remitDigest`, from `eth_signTypedData_v4` (RM-5).
+     *
+     * Optional: an unsigned Remit still binds every hash the receipt chain needs, and the
+     * on-chain preset is the real authority either way (cut line C5). What signatures add
+     * is attribution — which owners agreed to this authority.
+     */
+    signatures: z.array(z.string().regex(/^0x[0-9a-fA-F]+$/)).optional(),
   })
   .strict();
 

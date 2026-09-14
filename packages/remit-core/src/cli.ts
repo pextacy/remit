@@ -75,6 +75,7 @@ switch (command) {
         intent: z.unknown(),
         now: z.number().int(),
         ledger: z.array(ledgerEntrySchema).default([]),
+        seenStrategyHash: z.string().optional(),
       })
       .safeParse(readStdin());
     if (!input.success) fail("envelope input invalid", input.error.issues);
@@ -91,6 +92,9 @@ switch (command) {
       intent: input.data.intent,
       now: input.data.now,
       ledger: input.data.ledger,
+      ...(input.data.seenStrategyHash === undefined
+        ? {}
+        : { seenStrategyHash: input.data.seenStrategyHash }),
     });
 
     if (!result.ok) emit({ ok: false, error: result.error }, 2);
@@ -112,6 +116,7 @@ switch (command) {
         usd: decision.usd,
         usdMicros: decision.usdMicros.toString(),
         requiresReview: decision.requiresReview,
+        reviewReason: decision.reviewReason ?? null,
         headroomMicros: decision.headroomMicros.toString(),
         entry: decision.entry,
       },
@@ -315,6 +320,7 @@ switch (command) {
         rolesModifier: z.string(),
         agent: z.string(),
         fromBlock: z.number().int().min(0).optional(),
+        signatures: z.array(z.string()).optional(),
       })
       .safeParse(readStdin());
     if (!input.success) fail("preset:check input invalid", input.error.issues);
@@ -338,6 +344,9 @@ switch (command) {
       ...(input.data.fromBlock === undefined
         ? {}
         : { fromBlock: BigInt(input.data.fromBlock) }),
+      ...(input.data.signatures === undefined
+        ? {}
+        : { signatures: input.data.signatures as `0x${string}`[] }),
     });
 
     emit({ ok: check.ok, check }, check.ok ? 0 : 2);

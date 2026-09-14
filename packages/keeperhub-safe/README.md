@@ -26,12 +26,15 @@ genuinely missing, and upstream says what it is in its own source — see `ISSUE
 ## What is here
 
 ```
-steps/policy-check.ts        → plugins/safe/steps/policy-check.ts
-steps/policy-check-core.ts   → plugins/safe/steps/policy-check-core.ts
-index.action.ts              → one entry to add in plugins/safe/index.ts
-docs/safe-policy-check.md    → docs/workflows/safe-policy-check.md
-ISSUE.md                     → the issue to file first
-PR.md                        → the pull request description
+steps/policy-check.ts            → plugins/safe/steps/policy-check.ts
+steps/policy-check-core.ts       → plugins/safe/steps/policy-check-core.ts
+index.action.ts                  → one entry to add in plugins/safe/index.ts
+tests/safe-policy-check.test.ts  → tests/unit/safe-policy-check.test.ts
+tests/safe-policy-check.fork.test.ts → tests/e2e/vitest/safe-policy-check-fork.test.ts
+docs/safe-policy-check.md        → docs/workflows/safe-policy-check.md
+patches/decode-revert-error.md   → a second, smaller fix found while testing
+ISSUE.md                         → the issue to file first
+PR.md                            → the pull request description
 ```
 
 Self-contained by construction: nothing here imports `@remit/core` or anything else from
@@ -42,13 +45,30 @@ commit `f8c8f18c754ccbca481774a1c3c0fdf71e282e96` (docs/VERIFIED.md §17).
 already registers `getPendingTransactionsAction`; a plugin that overwrote it would delete a
 working action, and a reviewer would be right to reject it.
 
-## What is not here
+## Tests
 
-**Tests.** `BP-4` asks for unit tests plus a Base Sepolia fork test, and they are the
-remaining work before this can be opened as a pull request — `CONTRIBUTING.md` expects
-them and the change is not mergeable without them. They were left out under a standing
-instruction for this build, not because the requirement went away. The issue draft names
-the files they belong in.
+Ten unit tests, run inside a clone of their repository: **10 passed**. Their whole unit
+suite runs with the plugin and the tests in it — 23,276 passing — and the two files that
+fail, fail **identically on a pristine checkout**, so nothing here broke anything.
+
+They mock what a unit test should and no more. `classifyRevert` is deliberately *not*
+mocked: the value of this step is that a refusal comes back as a name rather than a hex
+blob, and a test that mocked the classifier would prove the plumbing works while saying
+nothing about whether the answer is right. The tests feed it real encoded revert data —
+a real `ConditionViolation(uint8,bytes32)`, a real `NoMembership()` — and check what comes
+out.
+
+That is how the second finding turned up. See `patches/decode-revert-error.md`: the
+modifier error list in `lib/web3/decode-revert-error.ts` does not match the deployed
+Roles 2.1.0 mastercopy. Four of its five fragments are errors the modifier cannot emit,
+and `NoMembership()` — the revert every org sees the moment a role is revoked — is
+missing, so it reports as `unknown` today.
+
+The fork test is in `tests/safe-policy-check.fork.test.ts`, shaped like their
+`safe-roles-orchestrator-fork.test.ts` and skipping itself without an RPC key, the way
+theirs does.
+
+## What is not here
 
 **A posted issue or PR.** Upstream requires an accepted issue before a pull request
 (`ISSUES.md`), and posting either is an outward-facing action for the repository owner.

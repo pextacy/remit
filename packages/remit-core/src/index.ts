@@ -14,6 +14,7 @@ export * from "./canonical/json.js";
 export * from "./chain/index.js";
 export * from "./compile/action.js";
 export * from "./eip712/remit.js";
+export * from "./eip712/signatures.js";
 export * from "./receipts/index.js";
 
 export * from "./review/index.js";

@@ -40,6 +40,20 @@ export default function Review() {
               {item.reason}. Approving leaves {item.headroomUsd} USD of headroom today.
             </p>
 
+            {item.balanceDelta === undefined ? null : (
+              <p style={{ margin: "0 0 14px" }}>
+                <span className="pill warn">safe USDC {item.balanceDelta.usdc}</span>{" "}
+                <span className="muted">{item.balanceDelta.note}</span>
+                <span
+                  className="muted"
+                  style={{ display: "block", fontSize: 12, marginTop: 4 }}
+                >
+                  Simulated against current state — the check on whether the call does
+                  what its name says.
+                </span>
+              </p>
+            )}
+
             <table>
               <tbody>
                 <tr>

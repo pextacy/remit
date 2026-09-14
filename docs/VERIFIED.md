@@ -652,11 +652,76 @@ never let "could not read" look like "the constant changed".
 
 ---
 
+## 21. Completing what was left
+
+The P1-priority requirements that had never been implemented, and the two verbs the
+public CLI was missing. All observed on 2026-09-14 against the fork.
+
+### RM-5 — the Remit, signed and verified
+
+`pnpm --filter ops remit:sign` signs the EIP-712 digest with every owner the machine can
+sign for — `eth_signTypedData_v4` through the node on a fork, so no key exists in the
+process. `remit serve` verifies them against the Safe's **current** owners before it
+accepts anything.
+
+| | |
+|---|---|
+| three owners sign | `ok  3 of 2 required owner signatures` |
+| the bridge starts | `signed  3 owner signature(s), verified against the Safe's current owners` |
+| one hex digit flipped in each | `REMIT_SIGNATURES_INVALID: 0 valid owner signature(s), 2 required; 2 signature(s) are not from a current Safe owner` → refused to start |
+
+Verifying against the chain's owners rather than a list in the file is the point: owners
+change, and a signature from a removed owner no longer carries their authority.
+
+### G3-5 — a changed strategy version forces review
+
+G1 now takes the `strategyHash` this agent last actually executed under, read from the
+receipt chain. A Remit reissued against an edited strategy held a **0.50 USD** action —
+well under the 1 USD threshold — with the reason *"the strategy has changed version since
+this agent last executed"*. A new version's first transaction is the one worth looking at,
+and it is exactly the one a notional threshold waves through.
+
+### G3-4 — the simulated balance delta
+
+The review queue now carries what the Safe's USDC would do, and the console shows it:
+
+```
+safe USDC -5    160 → 155 USDC in the Safe
+                Simulated against current state — the check on whether the call
+                does what its name says.
+```
+
+`eth_simulateV1` with three calls in one simulated block: read the Safe's balance, run the
+call as the agent, read it again. **Not** viem's `traceAssetChanges`, which reports changes
+for the *sending* account — here the agent EOA, whose balance does not move. The account
+whose balance matters is the Safe. A node that cannot simulate gets "unavailable" rather
+than a guessed number.
+
+### The four verbs
+
+`remit issue` and `remit revoke` now exist, so the public CLI is the four verbs CLAUDE.md
+§1 names. Both are deliberately thin wrappers over the ops scripts that do the chain work —
+duplicating that work in Python would be a second implementation of the thing this project
+is about not having.
+
+### One bug this pass found, and it was hiding others
+
+`core.py` preferred the built `dist/cli.js` whenever it existed. A stale build therefore
+ran silently: a signature check that had been written, wired and unit-checked reported
+green against a `dist` compiled before it existed. It now prefers the build **only when it
+is newer than the sources**, and the console's scripts rebuild the core before running.
+
+A stale gate is the worst kind of bug in a system like this — everything keeps answering,
+the answers look right, and they are the answers of code nobody is reading any more.
+
+---
+
 ## Re-verification log
 
 | Date | What | Result |
 |---|---|---|
 | 2026-09-13 | Full P0 pass: 24 chain assertions across 8453 and 84532 | all pass |
+| 2026-09-14 | Completion pass: RM-5 signing and startup verification, G3-4 balance delta, G3-5 strategy-change review, the `issue` and `revoke` verbs, BP-4 tests | all observed; a stale-build trap found and closed |
 | 2026-09-14 | P10: submit:check over PLAN §11 — 12 checked, 3 blocking, 6 human; whole git history scanned clean; full path re-run cold | ready except the three known blockers |
 | 2026-09-14 | P9: five console screens rendering live fork data; G3 approved and declined end to end, with a `declined_g3` receipt | all 200, gate wired |
 | 2026-09-14 | P8: all seven NH requirements demonstrated with receipts; the injection scenario twice in a row; the chain verified from a clean clone and a tamper caught there | 8/8 held |

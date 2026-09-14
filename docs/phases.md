@@ -367,8 +367,7 @@ completes the surface; unit tests plus one Base Sepolia fork test and a docs pag
 the requirements; the PR description references and closes #1241 and pastes the output of a
 real run.
 
-**Closes** BP-2, BP-3, BP-5. **BP-1 is answered differently** and **BP-4 is not done** —
-see below.
+**Closes** BP-2, BP-3, BP-4, BP-5. **BP-1 is answered differently** — see below.
 
 **Status — 2026-09-14: the code is written and verified inside a clone of their
 repository. It is not posted, and it has no tests.**
@@ -389,12 +388,18 @@ is spent instead of decoding the answer afterwards.
 | BP-1 four nodes | **answered differently.** Three of the four exist upstream already; the fourth, `policy_check`, is what this contributes |
 | BP-2 matches their conventions | done — `"use step"`, `runPluginStep`, `maxRetries = 0`, the core-file pattern, their action-definition shape |
 | BP-3 self-contained, copies cleanly | **verified by doing it**: copied into a clone, `npx tsgo --noEmit` exits 0, `pnpm discover-plugins` registers it, their 61 Safe unit tests pass |
-| BP-4 unit tests + fork test | **not done.** Tests were out of scope for this build by instruction. This is the remaining work before the PR can be opened, and it is named as such in the drafts |
+| BP-4 unit tests + fork test | **done.** Ten unit tests, run inside a clone of their repository: 10 passed. Their whole unit suite runs with the plugin and tests in it — 23,276 passing — and the two files that fail, fail identically on a pristine checkout |
 | BP-5 docs page + PR referencing the issue | docs page written; the issue and PR drafts are written and **unposted** — upstream requires an accepted issue first (OQ-4), and posting is the repository owner's action |
 
-Their tooling caught three things reading alone would not: `StepContext` has no `userId`,
-`getChainIdFromNetwork` is synchronous, and the repository targets ES2017 so `0n` does not
-compile. Verification by running beats verification by reading, every time.
+Their tooling caught four things reading alone would not: `StepContext` has no `userId`,
+`getChainIdFromNetwork` is synchronous, the repository targets ES2017 so `0n` does not
+compile, and — from the tests, which deliberately do not mock `classifyRevert` — **their
+Roles error list does not match the deployed mastercopy**. Four of its five fragments are
+errors the modifier cannot emit, and `NoMembership()`, the revert every org sees the moment
+a role is revoked, is missing entirely. Written up in
+`packages/keeperhub-safe/patches/decode-revert-error.md` as a second, smaller fix.
+
+Verification by running beats verification by reading, every time.
 
 **Exit gate**
 - `packages/keeperhub-safe/` copies into `keeperhub/plugins/safe/` with **no edits** and no

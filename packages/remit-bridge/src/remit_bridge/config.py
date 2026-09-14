@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +52,10 @@ class RemitBundle:
     remit_hash: str
     remit: dict[str, Any]
     limits: dict[str, Any]
+    #: Owner signatures over the digest, if the Remit carries any (RM-5). An unsigned
+    #: Remit is usable — the preset is the authority either way — but signatures that do
+    #: not verify are worse than none, and the startup check says so.
+    signatures: list[str] = field(default_factory=list)
 
 
 def _read_json(path: Path, what: str) -> dict[str, Any]:
@@ -92,6 +96,7 @@ def load_remit(network: str) -> RemitBundle:
         remit_hash=str(raw["remitHash"]),
         remit=dict(raw["remit"]),
         limits=dict(raw["limits"]),
+        signatures=[str(s) for s in raw.get("signatures", [])],
     )
 
 

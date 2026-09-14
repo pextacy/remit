@@ -50,13 +50,31 @@ This puts the existing pieces together before the write instead of after it:
 - `refusedByRole` separates "the role said no" from "the role said yes and the call would
   fail anyway" — an exhausted allowance is a different problem with a different fix.
 
-## Output of a real run
+## What was run
+
+```
+npx tsgo --noEmit                              exit 0, whole repo
+pnpm discover-plugins                          registers safe/policy-check → policyCheckStep
+npx vitest run tests/unit/safe-policy-check    10 passed
+npx vitest run tests/unit                      23,276 passed
+```
+
+The two unit files that fail in that last run — `use-persisted-nav-state` and
+`welcome-status` — fail identically on a pristine checkout of this commit, so they are not
+this change.
 
 <!--
-Paste the output of the fork test and of a workflow run against Base Sepolia here: one
-`allowed: true`, one refusal with a named `Status`, and the gas figure. A description of
-behaviour is not evidence of it.
+Before opening: add the output of the fork test against Base Sepolia, and of a workflow run
+using the node — one `allowed: true` with its gas figure, one refusal with a named Status.
+A description of behaviour is not evidence of it.
 -->
+
+## A second finding, while testing
+
+`lib/web3/decode-revert-error.ts` cannot decode `NoMembership()` — the revert every org
+sees the moment a role is revoked. Four of its five Roles error fragments are errors the
+deployed 2.1.0 mastercopy cannot emit, and the three it emits most often are missing.
+Written up separately; happy to split it into its own issue and PR.
 
 ## Notes for review
 

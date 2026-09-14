@@ -20,11 +20,18 @@ import {
   type Receipt,
   type Remit,
   type ReviewDecision,
+  readChain,
   readDecision,
 } from "@remit/core";
 import type { Address, Hex } from "viem";
+import { simulateBalanceDelta } from "./balance-delta.js";
 import { explorerTx, type Sender } from "./clients.js";
-import { executeThroughRole, preflight, refusalIsOpaque } from "./exec-role.js";
+import {
+  encodeRoleCall,
+  executeThroughRole,
+  preflight,
+  refusalIsOpaque,
+} from "./exec-role.js";
 import { appendLedger, readLedger } from "./ledger-store.js";
 import { fail, logEvent, say } from "./log.js";
 import type { Network } from "./networks.js";
@@ -126,6 +133,20 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
   } as const;
 
   // ---- G1 ------------------------------------------------------------------
+  /**
+   * The strategy version this agent last actually executed under, read from the chain of
+   * receipts rather than from a variable. If it differs from the one the Remit binds, the
+   * strategy has changed since anybody watched it act, and G1 holds the next action for
+   * review whatever its size (G3-5).
+   */
+  // `allowMissing`: the first proposal against a fresh chain has no receipts, and that is
+  // the genesis case rather than an error.
+  const lastExecuted = [
+    ...readChain(dir, { allowMissing: true }).map((entry) => entry.receipt as Receipt),
+  ]
+    .reverse()
+    .find((receipt) => receipt.outcome === "executed");
+
   const envelope = checkEnvelope({
     remit,
     limits,
@@ -133,6 +154,9 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
     intent: input.intent,
     now,
     ledger: readLedger(network.name),
+    ...(lastExecuted === undefined
+      ? {}
+      : { seenStrategyHash: lastExecuted.strategyHash }),
   });
 
   if (!envelope.ok) {
@@ -229,6 +253,15 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
   const g3: GateOutcome[] = [];
   if (decision.requiresReview && input.reviewDir !== undefined) {
     const id = randomUUID();
+    // Simulated before the item is queued, so the reviewer sees it on first render
+    // rather than waiting for it.
+    const delta = await simulateBalanceDelta(
+      network,
+      agent.address,
+      remit.safe,
+      rolesModifier,
+      encodeRoleCall(remit.roleKey, action),
+    );
     enqueueReview(input.reviewDir, {
       id,
       at: now,
@@ -241,10 +274,19 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
         { gate: "G2", outcome: "pass", detail: "preflight clean, no gas spent" },
       ],
       headroomUsd: (Number(decision.headroomMicros) / 1e6).toFixed(2),
-      reason: `above the Remit's review threshold of ${limits.requireReviewAboveUsd} USD`,
+      reason:
+        decision.reviewReason ??
+        `above the Remit's review threshold of ${limits.requireReviewAboveUsd} USD`,
+      ...(delta.available
+        ? { balanceDelta: { usdc: delta.usdc, note: delta.note } }
+        : {}),
     });
 
     say(`G3 WAITING  ${id} — a human has to approve this in the console`);
+    say(`            ${decision.reviewReason ?? "above the review threshold"}`);
+    say(
+      `            safe USDC ${delta.available ? `${delta.usdc} (${delta.note})` : delta.note}`,
+    );
     logEvent("gate.g3", { outcome: "waiting", id, usd: decision.usd });
 
     const answer = await waitForDecision(

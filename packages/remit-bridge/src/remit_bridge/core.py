@@ -25,15 +25,26 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 CORE_DIR = REPO_ROOT / "packages" / "remit-core"
 
 
+def _newest_source_mtime() -> float:
+    """When the core's sources last changed."""
+    newest = 0.0
+    for path in (CORE_DIR / "src").rglob("*.ts"):
+        newest = max(newest, path.stat().st_mtime)
+    return newest
+
+
 def _command(subcommand: str) -> list[str]:
     """How to run the core CLI.
 
-    `tsx` during development, the built `dist/cli.js` when it exists. Both are the
-    same source; the built one is what a clean clone should use once P9's setup
-    step has run.
+    The built `dist/cli.js` when it is **newer than the sources**, `tsx` otherwise.
+
+    That condition is not fussiness. A stale build is the worst kind of bug in a system
+    like this: the gates keep answering, the answers look right, and they are the answers
+    of code nobody is reading any more. It cost an hour here — a signature check that had
+    been written, tested and wired ran green against a `dist` built before it existed.
     """
     built = CORE_DIR / "dist" / "cli.js"
-    if built.exists():
+    if built.exists() and built.stat().st_mtime >= _newest_source_mtime():
         return ["node", str(built), subcommand]
     return ["pnpm", "--silent", "--filter", "@remit/core", "cli", subcommand]
 
@@ -147,8 +158,9 @@ def check_preset(
     roles_modifier: str,
     agent: str,
     from_block: int | None = None,
+    signatures: list[str] | None = None,
 ) -> dict[str, Any]:
-    """RM-4. Does the chain still say what the Remit claims it says?"""
+    """RM-4 and RM-5. Does the chain still say what the Remit claims it says?"""
     payload: dict[str, Any] = {
         "rpcUrl": rpc_url,
         "chainId": chain_id,
@@ -159,6 +171,8 @@ def check_preset(
     }
     if from_block is not None:
         payload["fromBlock"] = from_block
+    if signatures:
+        payload["signatures"] = signatures
     answer, _code = invoke("preset:check", payload)
     check: dict[str, Any] = answer.get("check", {"ok": False, "findings": []})
     return check

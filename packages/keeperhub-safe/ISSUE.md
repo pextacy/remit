@@ -56,8 +56,9 @@ anything to do with policy *installation*, which `POST .../role/simulate` alread
 - One action entry pushed onto the `safe` integration in `plugins/safe/index.ts`, beside
   `getPendingTransactionsAction`.
 - `docs/workflows/safe-policy-check.md` — a docs page.
-- `tests/unit/safe-policy-check.test.ts` — unit tests, plus a Base Sepolia fork test
-  alongside `tests/e2e/vitest/safe-roles-orchestrator-fork.test.ts`.
+- `tests/unit/safe-policy-check.test.ts` — ten unit tests, written and passing against a
+  clone of this repository, plus a fork test alongside
+  `tests/e2e/vitest/safe-roles-orchestrator-fork.test.ts`.
 
 Behaviour worth agreeing before code review:
 

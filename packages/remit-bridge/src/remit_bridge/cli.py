@@ -1,9 +1,14 @@
 """`remit` — the four verbs.
 
-    remit issue    build and sign a Remit       (ops/remit:issue today; P5 moves it here)
-    remit serve    run a strategy under a Remit (P5, once the Almanak seam is wired)
+    remit issue    build and sign a Remit
+    remit serve    run a strategy under a Remit
     remit verify   check the receipt chain
-    remit run      one intent, through the gates and KeeperHub
+    remit revoke   the kill switch
+
+    remit run      one intent, through the gates and KeeperHub — the fifth verb, and the
+                   honest name for what P3 has: a single hand-written intent, taken
+                   through G1 and submitted by KeeperHub. `serve` is the same path with a
+                   strategy on the front of it.
 
 `run` is the honest name for what P3 has: a single hand-written intent, taken
 through G1 and then submitted by KeeperHub. `serve` is the same path with an
@@ -20,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -78,6 +84,68 @@ def _to_units(amount: str) -> str:
     """USDC has six decimals. Parsed exactly, never through a float."""
     whole, _, fraction = amount.partition(".")
     return str(int(whole or "0") * 1_000_000 + int((fraction or "").ljust(6, "0")[:6]))
+
+
+def _ops(script: str, forwarded: list[str]) -> int:
+    """Run one of the ops scripts and let its output through.
+
+    `issue` and `revoke` are the two of the four verbs whose work is chain work: building
+    and signing a document, and sending an owner transaction. That work lives in `ops`,
+    where the keys and the deployment records are, and duplicating it here would be a
+    second implementation of the thing the whole project is about not having.
+
+    So they are wrappers, deliberately thin. The four verbs are the public surface
+    (CLAUDE.md §1); where each one's work happens is an implementation detail, and an
+    operator should not have to know two command vocabularies.
+    """
+    command = ["pnpm", "--filter", "ops", script, *forwarded]
+    _log("ops.delegate", script=script, args=forwarded)
+    completed = subprocess.run(command, cwd=REPO_ROOT, check=False)  # noqa: S603
+    return completed.returncode
+
+
+def cmd_issue(args: argparse.Namespace) -> int:
+    """`remit issue` — build the Remit, then sign it as the owners this machine holds."""
+    forwarded = [
+        "--network",
+        args.network,
+        "--strategy",
+        args.strategy,
+        "--workflow",
+        args.workflow,
+    ]
+    if args.days is not None:
+        forwarded += ["--days", str(args.days)]
+
+    code = _ops("remit:issue", forwarded)
+    if code != 0:
+        return code
+
+    if args.sign:
+        # Signing is a separate step because it can fail for a reason that is not a
+        # failure: a 2-of-3 Safe whose second owner has not signed yet is a Remit waiting,
+        # not a Remit broken.
+        signed = _ops("remit:sign", ["--network", args.network])
+        if signed != 0:
+            _say("")
+            _say("The Remit is issued but not signed to threshold yet. That is a")
+            _say("normal intermediate state: another owner signs, and `remit serve`")
+            _say("verifies it before accepting anything.")
+    return 0
+
+
+def cmd_revoke(args: argparse.Namespace) -> int:
+    """`remit revoke` — the kill switch.
+
+    One Safe owner transaction. It proves it took effect by re-running the preflight
+    afterwards, and writes a receipt for the state either side of the transition.
+    """
+    forwarded = ["--network", args.network]
+    if args.restore:
+        forwarded.append("--restore")
+    if args.confirm:
+        forwarded.append("--confirm")
+    return _ops("kill", forwarded)
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -297,6 +365,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         roles_modifier=deployment.roles_modifier,
         agent=deployment.agent_signer,
         from_block=deployment.roles_deployed_block,
+        signatures=bundle.signatures,
     )
 
     _say(f"remit      {bundle.remit_hash}")
@@ -318,6 +387,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
         return 5
 
     _say("preset     agrees with the Remit — the limits are enforced by the chain")
+    _say(
+        f"signed     {len(bundle.signatures)} owner signature(s), verified against the "
+        "Safe's current owners"
+        if bundle.signatures
+        else "signed     no — the Remit is unsigned; the preset is still the authority"
+    )
 
     # AL-1/AL-4: the Remit binds a *version* of the strategy. If the file on disk no
     # longer hashes to it, the receipts this run would write would name source that did
@@ -386,6 +461,28 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="remit", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+
+    issue = sub.add_parser("issue", help="build and sign a Remit")
+    issue.add_argument("--network", default="base-sepolia")
+    issue.add_argument(
+        "--strategy",
+        default=str(REPO_ROOT / "strategies" / "remit_usdc_lender" / "strategy.py"),
+    )
+    issue.add_argument(
+        "--workflow",
+        default=str(REPO_ROOT / "ops" / "workflows" / "exec-with-role.workflow.json"),
+    )
+    issue.add_argument("--days", type=int, default=None)
+    issue.add_argument(
+        "--no-sign", dest="sign", action="store_false", help="issue without signing"
+    )
+    issue.set_defaults(handler=cmd_issue, sign=True)
+
+    revoke = sub.add_parser("revoke", help="the kill switch")
+    revoke.add_argument("--network", default="base-sepolia")
+    revoke.add_argument("--restore", action="store_true", help="give the role back")
+    revoke.add_argument("--confirm", action="store_true")
+    revoke.set_defaults(handler=cmd_revoke)
 
     verify = sub.add_parser("verify", help="check the receipt chain")
     verify.add_argument("--network", default="base-sepolia")
