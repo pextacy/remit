@@ -6,6 +6,21 @@
  * (PRD.md G1-1). Persisting it across a bridge restart is G1-5, and belongs to whatever
  * owns the process — not here.
  */
+import { z } from "zod";
+
+/**
+ * The same shape as a Zod schema, for the process boundary. The bridge sends its ledger
+ * across as JSON, and an entry that arrives malformed must be a refusal rather than a
+ * silently-zero spend.
+ */
+export const ledgerEntrySchema = z
+  .object({
+    at: z.number().int(),
+    usdMicros: z.string().regex(/^(0|[1-9][0-9]*)$/),
+    kind: z.enum(["approve", "supply", "withdraw"]),
+  })
+  .strict();
+
 export type LedgerEntry = {
   /** Unix seconds at which the action was admitted by G1. */
   readonly at: number;

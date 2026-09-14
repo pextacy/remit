@@ -75,6 +75,17 @@ The rolling spend ledger lives at `ops/deployments/<network>.ledger.json` and is
 only when value actually moved — a cap consumed by a call that spent nothing would tighten
 every time the chain said no.
 
+Every `propose` run leaves a receipt in `receipts/<network>/`, whichever gate decided. The
+chain is checked from the other side of the process boundary:
+
+```bash
+uv run --directory packages/remit-bridge remit verify --network anvil
+```
+
+`submission.path` in each receipt says `ops-direct` for this script, because the agent
+signer calls the Roles Modifier itself. The product path is `keeperhub`, and it is the
+bridge's (`remit run`), which stops rather than falling back when there is no API key.
+
 ## Rules that predate the code
 
 - **Base Sepolia is the default.** `--network base` additionally requires `--confirm`, and

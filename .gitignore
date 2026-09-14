@@ -19,3 +19,4 @@ __pycache__/
 ops/deployments/anvil.json
 ops/deployments/*.ledger.json
 ops/remits/anvil.json
+receipts/anvil/

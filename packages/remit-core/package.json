@@ -17,7 +17,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "type-check": "tsc -p tsconfig.check.json",
-    "verify:constants": "tsx scripts/verify-constants.ts"
+    "verify:constants": "tsx scripts/verify-constants.ts",
+    "cli": "tsx src/cli.ts"
   },
   "dependencies": {
     "viem": "2.56.5",
@@ -25,5 +26,8 @@
   },
   "devDependencies": {
     "@types/node": "26.5.1"
+  },
+  "bin": {
+    "remit-core": "./dist/cli.js"
   }
 }

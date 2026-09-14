@@ -20,6 +20,13 @@ What P0 did instead: read the route handlers in `KeeperHub/keeperhub` at commit
 `f8c8f18c…` and recorded the request and response shapes in docs/VERIFIED.md §5. That is
 an acceptable source, but it is not the same as a live 200.
 
+**What is already built against it.** `packages/remit-bridge/src/remit_bridge/keeperhub.py`
+implements both execution routes, the two status vocabularies, strict `executionId`
+correlation and `ReceiptUnresolvable`. `remit run` goes G1 → KeeperHub → receipt and stops
+with `CONFIG_MISSING` when there is no key — it does not fall back to a local signer,
+because a fallback would make KH-1 false in exactly the case where it matters. The first
+run against the live service is therefore a configuration step, not a build step.
+
 **Unblocks when** someone creates the account and generates a key. Then:
 
 1. `claude mcp add --transport http keeperhub https://app.keeperhub.com/mcp`
@@ -27,7 +34,13 @@ an acceptable source, but it is not the same as a live 200.
 3. Confirm the execute response really does carry `transactionHash`, and how often it is
    absent — KH-4 in PRD.md assumes polling is always required, and the source says it is
    not always. Record both shapes.
-4. Confirm the `mcp:read` scope is what an API key gets by default.
+4. Confirm the `mcp:read` scope is what an API key gets by default, and that
+   `/api/workflow/{id}/execute` accepts an API key rather than only an OAuth token with
+   `mcp:write` — the route reads both, and which one a `kh_` key satisfies decides whether
+   the workflow path or the direct-execution path is the one that ships.
+5. Check what a workflow with one write node actually returns in `transactionHashes`. If
+   it can return more than one, the workflow definition needs splitting, because
+   `resolve_tx_hash` refuses to guess which hash a receipt covers.
 
 Until then the bridge cannot be written against the real service, and every P3 estimate
 carries this risk.

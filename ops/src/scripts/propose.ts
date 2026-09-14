@@ -24,9 +24,15 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  appendReceipt,
   checkEnvelope,
+  EXPLORER,
   formatEnvelopeError,
+  type GateOutcome,
+  type Intent,
   limitsSchema,
+  type ReceiptBody,
+  remitDigest,
   remitSchema,
   USDC_DECIMALS,
 } from "@remit/core";
@@ -42,6 +48,7 @@ import { fail, logEvent, say } from "../lib/log.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..", "..", "..");
+const RECEIPTS = join(REPO, "receipts");
 
 const args = parseArgs();
 const network = networkFrom(args);
@@ -59,6 +66,8 @@ try {
 
 const remit = remitSchema.parse(file.remit);
 const limits = limitsSchema.parse(file.limits);
+const remitHashOf =
+  (file as { remitHash?: `0x${string}` }).remitHash ?? remitDigest(remit);
 const cast = await castFor(network);
 
 const amount = parseUnits(option(args, "amount") ?? "1", USDC_DECIMALS).toString();
@@ -98,6 +107,42 @@ const intent = buildIntent();
 const now = Math.floor(Date.now() / 1000);
 const ledger = readLedger(network.name);
 
+/**
+ * Every attempt leaves a record, whichever gate decided (PRD.md RC-1).
+ *
+ * `path: "ops-direct"` is the truth about this script: the agent signer calls the
+ * Roles Modifier itself, because KeeperHub needs an account nobody has yet (OQ-1).
+ * Recording it under its own name is what stops a receipt from implying KeeperHub
+ * executed something it never saw. When the bridge takes over, the path changes and
+ * the rest of the record does not.
+ */
+function writeReceipt(
+  body: Pick<ReceiptBody, "intent" | "action" | "gates" | "outcome" | "submission">,
+): void {
+  const { receipt, file } = appendReceipt(join(RECEIPTS, network.name), {
+    version: 1,
+    at: now,
+    network: network.name,
+    chainId: network.chainId,
+    remitHash: remitHashOf,
+    strategyHash: remit.strategyHash,
+    workflowHash: remit.workflowHash,
+    limitsHash: remit.limitsHash,
+    roleKey: remit.roleKey,
+    safe: remit.safe,
+    rolesModifier: remit.rolesModifier,
+    agent: cast.agent.address,
+    ...body,
+  });
+  say(`receipt     ${file}  ${receipt.selfHash}`);
+  logEvent("receipt.written", {
+    file,
+    selfHash: receipt.selfHash,
+    sequence: receipt.sequence,
+    outcome: receipt.outcome,
+  });
+}
+
 say(
   `remit     ${remit.limitsHash.slice(0, 10)}… caps ${limits.perTxCapUsd}/${limits.dailyCapUsd} USD`,
 );
@@ -116,6 +161,28 @@ const envelope = checkEnvelope({
 
 if (!envelope.ok) {
   say(`G1 REFUSED  ${formatEnvelopeError(envelope.error)}`);
+  writeReceipt({
+    intent: intent as Intent,
+    // Null, not filler: the intent never reached the compiler, so no call was built.
+    action: null,
+    gates: [
+      {
+        gate: "G1",
+        outcome: "refused",
+        code: envelope.error.code,
+        detail: formatEnvelopeError(envelope.error),
+      },
+    ],
+    outcome: "rejected_g1",
+    submission: {
+      path: "none",
+      executionId: null,
+      workflowId: null,
+      txHash: null,
+      explorer: null,
+      gasUsed: null,
+    },
+  });
   say("");
   say("No network call was made. The refusal cost one function call and no gas.");
   logEvent("gate.g1", { outcome: "refused", ...envelope.error });
@@ -146,6 +213,15 @@ const action = {
   data: decision.action.calldata,
 };
 
+/** The compiled call as a receipt records it: named parameters, never raw bytes. */
+const receiptAction = {
+  target: decision.action.target,
+  signature: decision.action.signature,
+  selector: decision.action.selector,
+  description: decision.action.description,
+  usd: decision.usd,
+};
+
 const check = await preflight(
   network,
   rolesModifier,
@@ -161,6 +237,31 @@ if (!check.ok) {
       "preflight returned an undecodable revert — the ABI no longer matches the chain",
     );
   }
+  writeReceipt({
+    intent: decision.intent,
+    action: receiptAction,
+    gates: [
+      { gate: "G1", outcome: "pass", detail: decision.action.description },
+      {
+        gate: "G2",
+        outcome: "refused",
+        code:
+          check.decoded.kind === "roles_condition_violation"
+            ? check.decoded.statusName
+            : check.decoded.kind,
+        detail: check.reason,
+      },
+    ],
+    outcome: "rejected_g2",
+    submission: {
+      path: "none",
+      executionId: null,
+      workflowId: null,
+      txHash: null,
+      explorer: null,
+      gasUsed: null,
+    },
+  });
   say("");
   say("One eth_call, no gas. The operator has the reason before anything is spent.");
   logEvent("gate.g2", { outcome: "refused", reason: check.reason });
@@ -182,8 +283,32 @@ const result = await executeThroughRole(
 // and an agent would lose its daily allowance to a venue outage.
 appendLedger(network.name, decision.entry);
 
+const g4: GateOutcome =
+  result.status === "success"
+    ? { gate: "G4", outcome: "pass", detail: result.hash }
+    : { gate: "G4", outcome: "reverted", detail: result.hash };
+
 say(`G4 ${result.status === "success" ? "PASS" : "REVERTED"}     ${result.hash}`);
 say(`            ${explorerTx(network.chainId, result.hash)}`);
+
+writeReceipt({
+  intent: decision.intent,
+  action: receiptAction,
+  gates: [
+    { gate: "G1", outcome: "pass", detail: decision.action.description },
+    { gate: "G2", outcome: "pass", detail: "preflight clean, no gas spent" },
+    g4,
+  ],
+  outcome: result.status === "success" ? "executed" : "reverted_g4",
+  submission: {
+    path: "ops-direct",
+    executionId: null,
+    workflowId: null,
+    txHash: result.hash,
+    explorer: `${EXPLORER[network.chainId]}/tx/${result.hash}`,
+    gasUsed: result.gasUsed.toString(),
+  },
+});
 logEvent("gate.g4", {
   outcome: result.status,
   txHash: result.hash,

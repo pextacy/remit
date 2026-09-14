@@ -190,6 +190,25 @@ Remit. The KeeperHub client with `execute` and `resolve_tx_hash`, correlating st
 
 **Closes** G2-1, G2-2, G2-3, KH-1, KH-2, KH-3, KH-4, RC-1, RC-2, RC-3.
 
+**Status — 2026-09-14: the receipt chain and the gates are done and observed; the
+KeeperHub leg is written but unexercised, blocked on OQ-1.**
+
+| Task | State |
+|---|---|
+| 2.3 KeeperHub client | written against the routes, field names, status vocabularies and auth header read from the repo at `f8c8f18c…`. Strict `executionId` correlation, capped backoff, `ReceiptUnresolvable` on ambiguity. **Never run against the live service** |
+| 2.4 Receipts | done — `selfHash` over canonical JSON, `prevHash` chaining, `verify_chain` re-deriving every hash plus `remitHash`/`limitsHash` from the stored documents. Receipts written for refusals too |
+| 2.5 G1 → compile → execute → receipt | done end to end, minus KeeperHub: six receipts over a fork, written by both the TypeScript ops path and the Python bridge, all verifying in one chain |
+| 2.1 / 1.8 plugin nodes | **deferred to P7.** `safe.policy_check` and `safe.exec_with_role` are plugin-shaped work whose premise P0 found to be stale (OQ-3), and upstream requires an accepted issue before a pull request (OQ-4). The capability itself exists — preflight and execution are in `ops` and `@remit/core` — so nothing downstream waits on it |
+
+The one architectural decision this phase forced: **the bridge does not reimplement the
+core.** The gate, canonical JSON, the EIP-712 digest and the receipt hash are TypeScript,
+and Python calls them over a process boundary. A subprocess per decision is cheap next to
+a receipt chain that silently forks because two languages disagreed about key order.
+
+Three tamper modes were tried against a committed chain and all three were caught,
+including a re-sealed receipt with a valid hash — the chain link catches what the hash
+alone cannot.
+
 **Exit gate**
 - A transaction that went Intent → G1 → KeeperHub → Roles → Safe, with a receipt written
   for it and a receipt written for a rejection.

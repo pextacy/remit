@@ -219,10 +219,66 @@ exhausted, the preflight returned `ModuleTransactionFailed()` before any gas was
 
 ---
 
+## 10. The receipt chain, observed
+
+Written and checked on 2026-09-14 over a fork of Base Sepolia. Six receipts, produced by
+two different programs, verified by a third.
+
+| Outcome | Written by | Gates recorded |
+|---|---|---|
+| `rejected_g1` | `ops propose` (TypeScript) | G1 refused — `action` is **null**, because the intent never reached the compiler |
+| `executed` ×3 | `ops propose` | G1 pass → G2 pass → G4 pass, with the transaction hash and an explorer link |
+| `rejected_g2` | `ops propose` | G1 pass → G2 refused with `ModuleTransactionFailed()`, no gas spent |
+| `rejected_g1` | `remit run` (Python) | appended to the same chain, and it still verifies |
+
+`uv run remit verify` re-derives all six from the bytes on disk, plus `remitHash` and
+`limitsHash` from the stored documents. The Python bridge does not implement any of that:
+it calls the TypeScript core over a process boundary, so there is one canonical JSON, one
+keccak, one gate. Two implementations of a hash rule become two hash rules the first time
+someone fixes a bug in one of them.
+
+Tamper detection, demonstrated three ways:
+
+| Tamper | Caught as |
+|---|---|
+| Edit an amount from 5 to 500 USD, leave `selfHash` | `selfHash does not match the receipt's own bytes` |
+| Delete a record from the middle of the chain | `sequence is out of order`, and `prevHash does not link` on every record after it |
+| Edit the amount **and** re-seal with a valid `selfHash` | `prevHash does not link to the previous receipt` — the next record still points at the hash the edited one used to have |
+
+The third is the one that matters: a forger who has read the code and can compute a
+correct hash still has to rewrite every record after the one they touched, and the head of
+the chain is what a receipt cites.
+
+## 11. KeeperHub client — written, not yet observed
+
+`packages/remit-bridge/src/remit_bridge/keeperhub.py` is written against the routes,
+field names, status vocabularies and auth header read from the KeeperHub repository at
+commit `f8c8f18c…` (§5 above). **It has not been run against the live service** — that
+needs an account (OQ-1) — so every model in it is a reading of the source rather than an
+observation, and it is marked as such in the module docstring.
+
+Two things the source settled that would otherwise have been guesses:
+
+- The two execution routes have **different status vocabularies and different hash
+  fields**. The workflow route returns `transactionHashes` (plural) with terminal statuses
+  `success | error | system_error | skipped | cancelled`; the direct route returns a single
+  `transactionHash` with `completed | failed`. Code that assumed one shape would silently
+  fail against the other.
+- `functionArgs` on `/api/execute/contract-call` is a **JSON string**, not an array.
+
+The plural `transactionHashes` is exactly the ambiguity KH-4 is about: an execution that
+reports more than one hash cannot be correlated to a single transaction by execution id
+alone, so `resolve_tx_hash` raises `ReceiptUnresolvable` with the candidates rather than
+picking one. A receipt is then written with `outcome: "unresolved"` and no hash. A gap in
+the chain is honest; a plausible wrong hash is what an auditor finds instead of us.
+
+---
+
 ## Re-verification log
 
 | Date | What | Result |
 |---|---|---|
 | 2026-09-13 | Full P0 pass: 24 chain assertions across 8453 and 84532 | all pass |
+| 2026-09-14 | P3: six receipts written by two programs over a fork, chain verified from Python through the TypeScript core, three tamper modes caught | chain intact, all tampers detected |
 | 2026-09-14 | P2: Remit issued and re-derived by viem, foundry and the committed file; G1 run over 19 intents covering every error code | all agree, 19/19 |
 | 2026-09-14 | P1 on a fork of Base Sepolia: Safe + Roles deployed, preset applied, 3 executions, 3 free refusals, 1 on-chain revert, kill switch pulled and restored | 15/15 steps, four consecutive clean runs |

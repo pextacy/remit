@@ -11,8 +11,8 @@ dependencies = [
     "httpx>=0.27,<1",
 ]
 
-# [project.scripts] is added in P3 with the CLI itself (`remit issue|serve|verify|revoke`).
-# Declaring an entry point that resolves to nothing installs a command that crashes.
+[project.scripts]
+remit = "remit_bridge.cli:main"
 
 [dependency-groups]
 dev = ["ruff==0.15.1"]
@@ -35,3 +35,7 @@ select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "T20", "RET", "SIM", "ARG", 
 [tool.ruff.lint.per-file-ignores]
 # The CLI is the one place that is allowed to print to an operator.
 "src/remit_bridge/cli.py" = ["T20"]
+# N818 wants every exception to end in "Error". These names are fixed by the spec —
+# PRD.md KH-4 says the ambiguity case raises `ReceiptUnresolvable` — and matching the
+# document a reviewer is reading is worth more than the suffix convention.
+"src/remit_bridge/errors.py" = ["N818"]

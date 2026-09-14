@@ -41,6 +41,10 @@ jobs:
       - run: uv sync --all-groups
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      # The bridge calls the TypeScript core across a process boundary. If that call
+      # breaks, every gate the bridge runs is skipped rather than failed, so the wiring
+      # is checked on every push.
+      - run: uv run remit --help
 
   calldata:
     runs-on: ubuntu-latest
@@ -72,6 +76,36 @@ jobs:
             echo "::error::calldata is built outside src/compile: $builders"; exit 1
           fi
           echo "clean"
+
+  receipts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Acceptance criterion 3: the committed chain verifies from a clean clone, with no
+      # access to our infrastructure. If it ever stops doing that, the provenance claim
+      # is void and we should hear about it from CI rather than from a judge.
+      - name: Committed receipt chains verify
+        run: |
+          set -eu
+          found=0
+          for dir in receipts/*/; do
+            ls "$dir"0000-*.json >/dev/null 2>&1 || continue
+            found=1
+            echo "verifying $dir"
+            # Absolute: a filtered pnpm script runs from the package directory, and a
+            # relative path that resolved to nothing used to verify an empty chain and
+            # pass. The CLI now refuses a missing directory; the path is absolute anyway.
+            echo "{\"dir\":\"$PWD/$dir\"}" | pnpm --silent --filter @remit/core cli receipt:verify
+          done
+          [ "$found" -eq 1 ] || echo "no committed chains yet — nothing to verify"
 
   secrets:
     runs-on: ubuntu-latest
