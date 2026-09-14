@@ -474,6 +474,26 @@ breaks" answer taken verbatim in spirit from `PRD.md` §8; candour has never hur
 
 **Closes** CN-1…CN-5, RC-5, G3-1…G3-3, acceptance criteria 6 and 7.
 
+**Status — 2026-09-14: the console and the documents are done. The video is not, and
+cannot be from here (OQ-10).**
+
+| Task | State |
+|---|---|
+| 4.4 Console | done — five screens on live data: gate counters, the ledger with integrity re-checked on every load, the Remit with headroom and expiry, the review queue, and the kill switch reading membership from the chain |
+| 4.6 README | done — pitch, the four gates, the preset that is the product, four-command setup, what is where, how to verify it yourself, and the transaction links **stated as missing** rather than implied |
+| 4.7 Demo video | **not done.** `docs/DEMO.md` is the script, timed, with every command working today and the questions to have answers ready for. Recording it is somebody's Thursday |
+| 4.8 Submission draft | done — `docs/SUBMISSION.md`, both BUIDLs, with the three blocked fields marked `[fill]` |
+
+G3 stopped being a placeholder. An action above the review threshold now enqueues and the
+pipeline *waits*; the console shows the decoded action in named parameters and writes a
+decision; declining produces a terminal `declined_g3` receipt in the same chain as every
+other outcome. A timeout is treated as a refusal, because a review that times out into an
+approval is not a review.
+
+The console reads the repository's own files and holds no keys. It cannot pull the kill
+switch — it prints the calldata and the address instead, so the switch works when our stack
+is the thing that has failed.
+
 **Exit gate**
 - Video uploaded.
 - Someone outside the team follows `README.md` from a clean clone and reaches a running

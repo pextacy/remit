@@ -6,17 +6,21 @@
  * are ordered or when a record is written. A mainnet path with its own copy of the gate
  * logic is a mainnet path that drifts from the one everybody rehearses on.
  */
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   appendReceipt,
   checkEnvelope,
   EXPLORER,
+  enqueueReview,
   formatEnvelopeError,
   type GateOutcome,
   type Intent,
   type Limits,
   type Receipt,
   type Remit,
+  type ReviewDecision,
+  readDecision,
 } from "@remit/core";
 import type { Address, Hex } from "viem";
 import { explorerTx, type Sender } from "./clients.js";
@@ -34,17 +38,50 @@ export type PipelineInput = {
   readonly agent: Sender;
   readonly intent: unknown;
   readonly receiptsRoot: string;
+  /**
+   * Where the G3 queue lives. When set, an action above the Remit's review threshold
+   * stops and waits for a human instead of proceeding. Absent, G3 is skipped and the
+   * receipt says so — an operator reading "G3: skipped" knows nobody looked, which is
+   * more use than a gate that silently passes everything.
+   */
+  readonly reviewDir?: string;
+  /** How long to wait for a decision before giving up. */
+  readonly reviewTimeoutSeconds?: number;
 };
 
 export type PipelineResult =
   | { readonly stage: "g1"; readonly ok: false; readonly receipt: Receipt }
   | { readonly stage: "g2"; readonly ok: false; readonly receipt: Receipt }
+  | { readonly stage: "g3"; readonly ok: false; readonly receipt: Receipt }
   | {
       readonly stage: "g4";
       readonly ok: boolean;
       readonly receipt: Receipt;
       readonly txHash: Hex;
     };
+
+/**
+ * Wait for a human, and treat silence as a refusal.
+ *
+ * A review that times out into an approval is not a review. The poll is a filesystem
+ * read every second: the console writes the decision as a file, so nothing needs a
+ * socket, a queue or a running server between the two halves.
+ */
+async function waitForDecision(
+  dir: string,
+  id: string,
+  timeoutSeconds: number,
+): Promise<ReviewDecision | undefined> {
+  const deadline = Date.now() + timeoutSeconds * 1000;
+
+  while (Date.now() < deadline) {
+    const answer = readDecision(dir, id);
+    if (answer !== undefined) return answer;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  return undefined;
+}
 
 export async function runPipeline(input: PipelineInput): Promise<PipelineResult> {
   const { network, remit, limits, rolesModifier, agent } = input;
@@ -188,6 +225,85 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
   }
   say("G2 PASS     the Roles Modifier would allow this call");
 
+  // ---- G3 ------------------------------------------------------------------
+  const g3: GateOutcome[] = [];
+  if (decision.requiresReview && input.reviewDir !== undefined) {
+    const id = randomUUID();
+    enqueueReview(input.reviewDir, {
+      id,
+      at: now,
+      network: network.name,
+      remitHash: input.remitHash,
+      intent: decision.intent,
+      action: receiptAction,
+      gates: [
+        { gate: "G1", outcome: "pass", detail: decision.action.description },
+        { gate: "G2", outcome: "pass", detail: "preflight clean, no gas spent" },
+      ],
+      headroomUsd: (Number(decision.headroomMicros) / 1e6).toFixed(2),
+      reason: `above the Remit's review threshold of ${limits.requireReviewAboveUsd} USD`,
+    });
+
+    say(`G3 WAITING  ${id} — a human has to approve this in the console`);
+    logEvent("gate.g3", { outcome: "waiting", id, usd: decision.usd });
+
+    const answer = await waitForDecision(
+      input.reviewDir,
+      id,
+      input.reviewTimeoutSeconds ?? 600,
+    );
+
+    if (answer === undefined) {
+      say("G3 TIMEOUT  nobody answered — treating silence as a refusal");
+      const receipt = write({
+        intent: decision.intent,
+        action: receiptAction,
+        gates: [
+          { gate: "G1", outcome: "pass" },
+          { gate: "G2", outcome: "pass" },
+          { gate: "G3", outcome: "declined", code: "G3_TIMEOUT", detail: id },
+        ],
+        outcome: "declined_g3",
+        submission: noSubmission,
+      });
+      return { stage: "g3", ok: false, receipt };
+    }
+
+    if (answer.decision === "declined") {
+      say(
+        `G3 DECLINED ${answer.by}${answer.note === undefined ? "" : `: ${answer.note}`}`,
+      );
+      logEvent("gate.g3", { outcome: "declined", id, by: answer.by });
+      const receipt = write({
+        intent: decision.intent,
+        action: receiptAction,
+        gates: [
+          { gate: "G1", outcome: "pass" },
+          { gate: "G2", outcome: "pass" },
+          {
+            gate: "G3",
+            outcome: "declined",
+            code: "G3_DECLINED",
+            detail: `${answer.by}${answer.note === undefined ? "" : `: ${answer.note}`}`,
+          },
+        ],
+        outcome: "declined_g3",
+        submission: noSubmission,
+      });
+      return { stage: "g3", ok: false, receipt };
+    }
+
+    say(`G3 APPROVED ${answer.by}`);
+    logEvent("gate.g3", { outcome: "approved", id, by: answer.by });
+    g3.push({ gate: "G3", outcome: "pass", detail: `approved by ${answer.by}` });
+  } else if (decision.requiresReview) {
+    g3.push({
+      gate: "G3",
+      outcome: "skipped",
+      detail: "no review queue configured — nobody looked at this",
+    });
+  }
+
   // ---- G4 ------------------------------------------------------------------
   const result = await executeThroughRole(
     network,
@@ -220,6 +336,7 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
     gates: [
       { gate: "G1", outcome: "pass", detail: decision.action.description },
       { gate: "G2", outcome: "pass", detail: "preflight clean, no gas spent" },
+      ...g3,
       g4,
     ],
     outcome: result.status === "success" ? "executed" : "reverted_g4",

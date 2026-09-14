@@ -25,3 +25,12 @@ ops/remits/anvil.json
 receipts/anvil/
 receipts/anvil-base/
 ops/remits/anvil-base.json
+ops/review/
+.next/
+next-env.d.ts
+
+# Next.js writes its own agent-guidance files into the console package on first run. A
+# second CLAUDE.md with different rules is a trap for whoever reads the repo next: the
+# working agreement is the one at the root.
+packages/remit-console/CLAUDE.md
+packages/remit-console/AGENTS.md

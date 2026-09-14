@@ -4,7 +4,7 @@ Verification tasks that are blocked, and decisions the P0 pass forced but cannot
 alone. The rule that produced this file: when a value cannot be verified against a live
 source, write the task down and stop — do not guess (CLAUDE.md §2.2).
 
-Status as of **2026-09-14**, end of the P6 pass.
+Status as of **2026-09-14**, end of the P9 pass.
 
 ---
 
@@ -102,6 +102,22 @@ the KeeperHub one.
 linked to Basescan, is the one failure that would deserve to sink the submission. The
 receipts from the rehearsal are gitignored for exactly that reason: they name a Safe that
 does not exist on the public chain, and a reader cannot tell that from the file.
+
+### OQ-10 — the demo video, and the third-party verification
+
+Two things left that are somebody's time rather than somebody's code:
+
+**The video.** `docs/DEMO.md` is the script: three minutes, timed, every command working
+today against a fork, and the questions to have answers ready for. Recording it needs a
+screen and a voice. Do it on **Thursday** — the day you think you have spare is the day
+the RPC key expires.
+
+**Acceptance criterion 3, the human half.** `remit verify` has been run from a fresh
+`git clone` with `pnpm install` and nothing else, and it catches an edited receipt, a
+deleted one, and an edited one re-sealed with a valid hash. What has not happened is
+*somebody who did not write it* running it. That is thirty seconds of another person's
+time and it is worth spending: the claim is that a stranger can check the chain, and the
+only way to know is to hand it to one.
 
 ### OQ-2 — DoraHacks registration, Discord, office hours
 

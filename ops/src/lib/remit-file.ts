@@ -18,6 +18,8 @@ import type { NetworkName } from "./networks.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO = join(HERE, "..", "..", "..");
 export const RECEIPTS_ROOT = join(REPO, "receipts");
+/** The G3 queue: pending items the console shows, decisions it writes back. */
+export const REVIEW_ROOT = join(REPO, "ops", "review");
 
 export type LoadedRemit = {
   readonly remit: Remit;

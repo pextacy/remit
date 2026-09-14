@@ -1,0 +1,25 @@
+{
+  "name": "remit-console",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --turbopack --port 3737",
+    "build": "next build",
+    "start": "next start --port 3737",
+    "type-check": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@remit/core": "workspace:*",
+    "next": "16.3.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "viem": "2.56.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.5.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "5.9.3"
+  }
+}

@@ -29,7 +29,7 @@ import { networkFrom, option, parseArgs } from "../lib/args.js";
 import { requireDeployment, requireField } from "../lib/deployment.js";
 import { fail, say } from "../lib/log.js";
 import { runPipeline } from "../lib/pipeline.js";
-import { loadRemit, RECEIPTS_ROOT } from "../lib/remit-file.js";
+import { loadRemit, RECEIPTS_ROOT, REVIEW_ROOT } from "../lib/remit-file.js";
 
 const args = parseArgs();
 const network = networkFrom(args);
@@ -80,12 +80,23 @@ const result = await runPipeline({
   agent: cast.agent,
   intent,
   receiptsRoot: RECEIPTS_ROOT,
+  // G3 only exists when somebody is watching. `--review` turns it on and points it at
+  // the queue the console reads; without it the receipt records that nobody looked.
+  ...(args.flags.has("review") ? { reviewDir: REVIEW_ROOT } : {}),
+  ...(option(args, "review-timeout") === undefined
+    ? {}
+    : { reviewTimeoutSeconds: Number(option(args, "review-timeout")) }),
 });
 
 if (result.stage === "g1") {
   say("");
   say("No network call was made. The refusal cost one function call and no gas.");
   process.exit(2);
+}
+if (result.stage === "g3") {
+  say("");
+  say("A human said no, or nobody said anything. Nothing was sent.");
+  process.exit(4);
 }
 if (result.stage === "g2") {
   say("");

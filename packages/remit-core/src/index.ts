@@ -15,6 +15,8 @@ export * from "./chain/index.js";
 export * from "./compile/action.js";
 export * from "./eip712/remit.js";
 export * from "./receipts/index.js";
+
+export * from "./review/index.js";
 export * from "./roles/index.js";
 export * from "./schema/intent.js";
 export * from "./schema/limits.js";

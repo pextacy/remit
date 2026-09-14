@@ -556,11 +556,62 @@ the first public-testnet run (OQ-6).
 
 ---
 
+## 19. The console, observed
+
+Run against the fork on 2026-09-14, `REMIT_NETWORK=anvil pnpm --filter remit-console dev`.
+All five screens return 200 and render live data.
+
+| Screen | What it showed |
+|---|---|
+| Overview | gate counters read from the receipts themselves — G1 10 attempts / 4 refused, G2 5/5, G4 6/3 — plus spend, headroom and chain integrity |
+| Ledger | 12 receipts with their gates, transaction links and `prev` hashes; the integrity line is recomputed from the bytes on every load |
+| Remit | the five hashes, the limits, headroom, and expiry as a countdown rather than a timestamp |
+| Kill switch | `agent authority: active`; after `ops kill`, the same page reloaded to `revoked` |
+| Review | the pending item, with the decoded action in named parameters |
+
+### G3, end to end
+
+```
+pnpm --filter ops propose --network anvil --kind approve --amount 5 --review
+  G1 PASS
+  G2 PASS
+  G3 WAITING  b5f821a6-… — a human has to approve this in the console
+      → console shows it; decision written
+  G3 APPROVED operator
+  G4 PASS     0x20e55851…
+```
+
+And the refusal, which is the half that matters (G3-3):
+
+```
+  G3 DECLINED treasury-op: not today
+  receipt 0013-declined_g3.json → outcome: declined_g3
+     G1 pass · G2 pass · G3 declined · G3_DECLINED · treasury-op: not today
+```
+
+A decline is a terminal receipt in the same chain as everything else. A timeout is treated
+the same way: a review that times out into an approval is not a review.
+
+Three properties of the console worth stating, because they are design decisions rather
+than omissions:
+
+- **It shows the decoded action, never raw calldata.** An operator asked to approve a hex
+  blob is being asked to rubber-stamp, and a gate that produces rubber-stamping is worse
+  than no gate because it launders the decision.
+- **It cannot pull the kill switch.** Revoking is a Safe owner transaction; the console has
+  no owner keys and should not want them. It gives the calldata and the address, so the
+  switch works when our stack is the thing that has failed.
+- **An unreachable chain reads as "unknown", not "revoked".** Telling someone the switch is
+  pulled when nobody checked is the worst answer that page could give.
+
+---
+
 ## Re-verification log
 
 | Date | What | Result |
 |---|---|---|
 | 2026-09-13 | Full P0 pass: 24 chain assertions across 8453 and 84532 | all pass |
+| 2026-09-14 | P9: five console screens rendering live fork data; G3 approved and declined end to end, with a `declined_g3` receipt | all 200, gate wired |
 | 2026-09-14 | P8: all seven NH requirements demonstrated with receipts; the injection scenario twice in a row; the chain verified from a clean clone and a tamper caught there | 8/8 held |
 | 2026-09-14 | P7: the policy-check action copied into a clone of `KeeperHub/keeperhub` — their type-check, their plugin discovery and their Safe unit tests all pass with it | mergeable except for tests |
 | 2026-09-14 | P6: the whole mainnet sequence rehearsed on a fork of Base mainnet — deploy, preset, fund, issue, preflight, two executions through the role | works at chain 8453; the public transaction still needs a funded key and KeeperHub |

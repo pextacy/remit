@@ -49,6 +49,21 @@ pnpm --filter ops kill --network base-sepolia
 pnpm --filter ops kill --network base-sepolia --restore
 ```
 
+## G3, and the console
+
+```bash
+# an action above the review threshold stops and waits for a person
+pnpm --filter ops propose --network anvil --kind approve --amount 5 --review
+
+# in another terminal
+REMIT_NETWORK=anvil pnpm --filter remit-console dev    # http://localhost:3737/review
+```
+
+Approving lets the pipeline continue; declining writes a terminal `declined_g3` receipt.
+Silence is a refusal — a review that times out into an approval is not a review. Without
+`--review` the gate is skipped and the receipt says so, which is more use than a gate that
+silently passes everything.
+
 ## Mainnet
 
 The runbook, the measured costs and the preconditions are in **docs/MAINNET.md**. The
