@@ -438,11 +438,65 @@ The runbook, the costs and the preconditions are in docs/MAINNET.md.
 
 ---
 
+## 17. The bounty contribution, verified against upstream
+
+The premise in `PRD.md` §5.10 is stale (OQ-3), so P7 narrowed to the gap upstream
+documents in its own source. `lib/execute/simulate.ts`:
+
+> **Known limitation:** `from` is resolved via `getOrganizationWalletAddress` (the org's
+> EOA / smart account address). Orgs that route writes through a Safe will produce a
+> simulation that reflects the EOA sending the call, not the Safe. This still catches most
+> config bugs (bad ABI, bad args, allowance mismatches) but does not perfectly mirror
+> Safe-routed `msg.sender` semantics.
+
+For a `safe-role` organization the Roles modifier is not in the simulated path at all: a
+call the role forbids simulates clean, is broadcast, and reverts on chain — decoded
+correctly by `classifyRevert`, after the gas is gone. The contribution is one action that
+asks the question first.
+
+Every upstream symbol it depends on was checked to exist at commit
+`f8c8f18c754ccbca481774a1c3c0fdf71e282e96`:
+
+| Symbol | Where |
+|---|---|
+| `buildExecTransactionWithRoleCalldata` | `lib/safe/zodiac-roles.ts:224` |
+| `resolveSignerMode`, `SignerMode` (`safe-role` carries `rolesModifierAddress`, `roleKey`, `delegateAddress`) | `lib/safe/signer-resolver.ts:197`, `:60` |
+| `getRpcProvider` | `lib/rpc/provider-factory.ts:118` |
+| `classifyRevert`, `formatContractError`, `RevertKind` (`role-condition-violation` carries `status`, `statusCode`, `paramOrKey`) | `lib/web3/decode-revert-error.ts:574`, `:180`, `:456` |
+| `runPluginStep`, `StepInput`, `StepContext` | `lib/workflow/executor/step-handler.ts:286`, `:79`, `:30` |
+| `getChainIdFromNetwork` | `lib/rpc/network-utils.ts:15` |
+
+Checked by copying the files into a clone of the repository and running their own tooling:
+
+| Check | Result |
+|---|---|
+| `npx tsgo --noEmit` (their canonical type-check, whole repo) | exit 0 |
+| `pnpm discover-plugins` | registers `safe/policy-check` → `policyCheckStep` in `lib/step-registry.ts` |
+| Their existing Safe unit tests, with the action registered | 61 passed |
+| Step-file rule 1 — exports only the step function, `_integrationType` and types | holds |
+| Their "no raw network egress in plugins" rule | holds — no `fetch`, `axios` or `http.request` |
+
+Three details their tooling settled that reading alone would have got wrong:
+
+- **`StepContext` has no `userId`.** `getRpcProvider({ chainId })` is the call; passing a
+  user id from the step context does not compile.
+- **`getChainIdFromNetwork` is synchronous** and throws on an unknown network.
+- **The repository targets ES2017**, so `0n` does not compile. Upstream writes `BigInt(0)`,
+  and so does this.
+
+**Not done: tests.** BP-4 asks for unit tests and a Base Sepolia fork test, and this is not
+mergeable without them — see the phase status. The issue and pull-request drafts are
+written and unposted; upstream requires an accepted issue before a pull request
+(`ISSUES.md`), and posting either is the repository owner's to do.
+
+---
+
 ## Re-verification log
 
 | Date | What | Result |
 |---|---|---|
 | 2026-09-13 | Full P0 pass: 24 chain assertions across 8453 and 84532 | all pass |
+| 2026-09-14 | P7: the policy-check action copied into a clone of `KeeperHub/keeperhub` — their type-check, their plugin discovery and their Safe unit tests all pass with it | mergeable except for tests |
 | 2026-09-14 | P6: the whole mainnet sequence rehearsed on a fork of Base mainnet — deploy, preset, fund, issue, preflight, two executions through the role | works at chain 8453; the public transaction still needs a funded key and KeeperHub |
 | 2026-09-14 | P5: the strategy decided and its intent crossed Almanak's own client into `remit serve`; four rogue intents refused by name; both startup drift checks refused | seam works, receipts carry the strategy hash |
 | 2026-09-14 | P4: `roles:diff` reconstructed the role from 11 events and matched the preset exactly; drift introduced and detected; kill switch pulled and restored with four receipts | diff exact, switch verified by preflight |

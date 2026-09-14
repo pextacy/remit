@@ -367,7 +367,34 @@ completes the surface; unit tests plus one Base Sepolia fork test and a docs pag
 the requirements; the PR description references and closes #1241 and pastes the output of a
 real run.
 
-**Closes** BP-1…BP-5, G-4.
+**Closes** BP-2, BP-3, BP-5. **BP-1 is answered differently** and **BP-4 is not done** —
+see below.
+
+**Status — 2026-09-14: the code is written and verified inside a clone of their
+repository. It is not posted, and it has no tests.**
+
+P0 found the premise stale (OQ-3): #1241 closed as completed, `plugins/safe/` and the whole
+Zodiac Roles path already shipped, and `decode-revert-error.ts` already decoding the
+modifier's `Status` enum. Building BP-1's four nodes would have meant re-implementing
+working code and opening a pull request against a closed issue.
+
+So the contribution narrowed to the gap upstream documents in its own source —
+`lib/execute/simulate.ts` says its simulation "does not perfectly mirror Safe-routed
+`msg.sender` semantics", and for a `safe-role` org the Roles modifier is not in the
+simulated path at all. One action, **Check Role Policy**, asks the question before the gas
+is spent instead of decoding the answer afterwards.
+
+| Requirement | State |
+|---|---|
+| BP-1 four nodes | **answered differently.** Three of the four exist upstream already; the fourth, `policy_check`, is what this contributes |
+| BP-2 matches their conventions | done — `"use step"`, `runPluginStep`, `maxRetries = 0`, the core-file pattern, their action-definition shape |
+| BP-3 self-contained, copies cleanly | **verified by doing it**: copied into a clone, `npx tsgo --noEmit` exits 0, `pnpm discover-plugins` registers it, their 61 Safe unit tests pass |
+| BP-4 unit tests + fork test | **not done.** Tests were out of scope for this build by instruction. This is the remaining work before the PR can be opened, and it is named as such in the drafts |
+| BP-5 docs page + PR referencing the issue | docs page written; the issue and PR drafts are written and **unposted** — upstream requires an accepted issue first (OQ-4), and posting is the repository owner's action |
+
+Their tooling caught three things reading alone would not: `StepContext` has no `userId`,
+`getChainIdFromNetwork` is synchronous, and the repository targets ES2017 so `0n` does not
+compile. Verification by running beats verification by reading, every time.
 
 **Exit gate**
 - `packages/keeperhub-safe/` copies into `keeperhub/plugins/safe/` with **no edits** and no

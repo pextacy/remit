@@ -2,7 +2,18 @@
   "$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
-    "includes": ["**", "!**/dist", "!**/node_modules", "!**/.venv", "!receipts"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/node_modules",
+      "!**/.venv",
+      "!receipts",
+      // `keeperhub-safe` is written in KeeperHub's conventions, against their tsconfig
+      // paths and their formatter. Formatting it to ours would produce a diff a reviewer
+      // has to undo, so it is checked by their tooling inside a clone of their repo
+      // instead (docs/VERIFIED.md §17).
+      "!packages/keeperhub-safe"
+    ]
   },
   "formatter": {
     "enabled": true,

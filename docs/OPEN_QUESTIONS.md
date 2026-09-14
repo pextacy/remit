@@ -132,7 +132,15 @@ in front of a judge as evidence of what ran.
 These are not blockers. They are three load-bearing claims in PRD.md that are no longer
 true, and each one changes what the week should build.
 
-### OQ-3 — Issue #1241 is closed, and Safe support already shipped
+### OQ-3 — Issue #1241 is closed, and Safe support already shipped — **decided**
+
+**Decision taken in P7: option 1.** The contribution narrowed to the gap upstream
+documents in its own source, and the code is written and verified inside a clone of their
+repository (docs/VERIFIED.md §17). What remains before it can be opened: unit tests and a
+fork test (BP-4), then the issue, then — once accepted — the pull request.
+
+The original finding, kept because it is why the shape changed:
+
 
 PRD.md §2 and §5.10 are built on "KeeperHub has no first-class Safe support (open issue
 #1241, milestone 2026 Q2)". At commit `f8c8f18c…`:
