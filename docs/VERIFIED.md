@@ -606,11 +606,58 @@ than omissions:
 
 ---
 
+## 20. The submission checklist, as a command
+
+`pnpm --filter ops submit:check` decides the half of PLAN.md §11 that a machine can, and
+names the rest as a person's. Run on 2026-09-14: **12 checked, 3 blocking, 6 waiting on a
+person**.
+
+The three blocking items are the same three that have been blocking since P0, stated the
+same way: no committed receipt chain (the rehearsal chains are gitignored, because a
+rehearsal chain is not evidence), no Base mainnet transaction, and — at the time of that
+run — an uncommitted working tree.
+
+Two checks worth having beyond the obvious:
+
+- **The whole git history is scanned for key material**, not the working tree. A key
+  removed in a later commit is still a key anybody can `git log -p` out of the repository,
+  and "we deleted it" is a disclosure rather than a remediation. 26,325 lines scanned,
+  clean.
+- **Every address the code can reach is matched against a row in this file.** The rule is
+  that nothing unverified reaches a chain (CLAUDE.md §2.2), and the way that rots is a
+  constant added in a hurry without its row. Eight checked.
+
+The quality gates are run rather than assumed: `type-check`, `biome check` and `ruff`, all
+three, on every invocation.
+
+### The final full run
+
+2026-09-14, cold, against a fork of Base Sepolia, in the order PLAN.md §8 asks for:
+
+| | |
+|---|---|
+| `verify:constants` | all constants agree with chain |
+| `p1` | 15 steps |
+| `remit:verify-digest` | three independent paths agree |
+| `g1` | 19 intents, 19 expected outcomes |
+| `roles:diff` | no difference |
+| `nh` | 8 requirements held |
+| `remit verify` | 12 receipts, chain intact |
+| `remit serve` + the strategy | preset agrees, strategy hash matches, G1 passed |
+
+One thing that run fixed: the public Base RPC rate-limited `verify:constants` into a
+false failure. It now retries six times with a quadratic backoff and uses `BASE_RPC_URL`
+when one is configured — the script that runs immediately before a mainnet execution must
+never let "could not read" look like "the constant changed".
+
+---
+
 ## Re-verification log
 
 | Date | What | Result |
 |---|---|---|
 | 2026-09-13 | Full P0 pass: 24 chain assertions across 8453 and 84532 | all pass |
+| 2026-09-14 | P10: submit:check over PLAN §11 — 12 checked, 3 blocking, 6 human; whole git history scanned clean; full path re-run cold | ready except the three known blockers |
 | 2026-09-14 | P9: five console screens rendering live fork data; G3 approved and declined end to end, with a `declined_g3` receipt | all 200, gate wired |
 | 2026-09-14 | P8: all seven NH requirements demonstrated with receipts; the injection scenario twice in a row; the chain verified from a clean clone and a tamper caught there | 8/8 held |
 | 2026-09-14 | P7: the policy-check action copied into a clone of `KeeperHub/keeperhub` — their type-check, their plugin discovery and their Safe unit tests all pass with it | mergeable except for tests |

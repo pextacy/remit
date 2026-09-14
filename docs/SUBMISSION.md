@@ -130,6 +130,44 @@ rather than re-implementing working code. That reasoning is in
 
 ---
 
+## Friday morning
+
+The timetable in PLAN.md §8, with the parts a machine can do turned into one command.
+
+```bash
+pnpm --filter ops submit:check
+```
+
+Sixteen items: the quality gates actually run, a scan of the **whole git history** for key
+material (not just the working tree — a key deleted in a later commit is still a key
+anyone can `git log -p` out of the repository), every address in `addresses.ts` matched
+against a row in `docs/VERIFIED.md`, every committed receipt chain re-verified, and the
+three links the form will not accept as blank. It reads and computes; it never fixes
+anything, because an item that fails is an item to go and fix.
+
+Before that, the full path once more against a fork — 07:00 in the plan, and about four
+minutes in practice:
+
+```bash
+anvil --fork-url https://sepolia.base.org --port 8546 &
+export ANVIL_RPC_URL=http://127.0.0.1:8546
+
+pnpm --filter @remit/core verify:constants        # the addresses still exist on chain
+pnpm --filter ops p1            --network anvil   # Safe, Roles, preset, a transaction, a refusal
+pnpm --filter ops remit:issue   --network anvil \
+  --strategy strategies/remit_usdc_lender/strategy.py \
+  --workflow ops/workflows/exec-with-role.workflow.json
+pnpm --filter ops remit:verify-digest --network anvil   # viem, foundry and the file agree
+pnpm --filter ops g1            --network anvil   # 19 intents, every refusal code
+pnpm --filter ops roles:diff    --network anvil   # the chain says what the preset says
+pnpm --filter ops fund          --network anvil --usdc 100
+pnpm --filter ops nh            --network anvil   # all seven, plus the injection story
+uv run --directory packages/remit-bridge remit verify --network anvil
+```
+
+Then tag, then submit, and do not start anything new. Friday is for submitting a thing
+that already works.
+
 ## Housekeeping before submitting
 
 - [ ] No `.env`, no key, no credential anywhere in the git history

@@ -158,6 +158,20 @@ this runner asks each one directly — that is how the injection scenario shows 
 gate catching what the first would have caught. Nothing in it is reachable from `propose`,
 `exec:mainnet` or `remit serve`.
 
+## Before submitting
+
+```bash
+pnpm --filter ops submit:check
+```
+
+PLAN.md §11, as far as a machine can decide it: the quality gates run, the whole git
+history scanned for key material, every address matched against its row in
+`docs/VERIFIED.md`, every committed receipt chain re-verified, and the three links the
+form will not accept as blank. Everything else it names as a person's job rather than
+ticking it.
+
+It never fixes anything. An item that fails is an item to go and fix.
+
 ## Rules that predate the code
 
 - **Base Sepolia is the default.** `--network base` additionally requires `--confirm`, and

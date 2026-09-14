@@ -511,6 +511,40 @@ ledger page generated from `receipts/`. The G3 gate itself is never cut — only
 **Entry** P9 exit gate.
 **Tasks** `PLAN.md` §8 timetable, `PLAN.md` §11 checklist.
 
+**Status — 2026-09-14: everything a machine can do is done. Submitting is not a thing I
+can do, and three mandatory fields are still blocked.**
+
+`pnpm --filter ops submit:check` turns PLAN.md §11 into one command: sixteen items, the
+quality gates actually run, the **whole git history** scanned for key material, every
+address matched against its row in `docs/VERIFIED.md`, every committed receipt chain
+re-verified, and the three links the form will not accept as blank. It reads and computes
+and never fixes anything — an item that fails is an item to go and fix.
+
+Result: **12 checked, 3 blocking, 6 waiting on a person.**
+
+| Blocking | Why |
+|---|---|
+| a committed receipt chain | the rehearsal chains are gitignored, because a rehearsal chain is not evidence (OQ-6) |
+| a Base mainnet transaction | OQ-9 — money and credentials, not code |
+| working tree clean | true again after this commit |
+
+| A person's | |
+|---|---|
+| filing the bounty issue, then the PR | OQ-4; drafts written and unposted |
+| recording the demo video | OQ-10; `docs/DEMO.md` is the script |
+| `remit verify` run by somebody who did not write it | OQ-10 |
+| the submission form's `[fill]` fields, contact details, eligibility | the form itself |
+
+The full path was re-run cold before this, in PLAN.md §8's order, and everything passed.
+That run caught one real thing: the public Base RPC rate-limited `verify:constants` into a
+false failure, so it now retries six times with a quadratic backoff and honours
+`BASE_RPC_URL`. The script that runs immediately before a mainnet execution must never let
+"could not read" look like "the constant changed".
+
+**I have not submitted anything, and will not.** Submitting publishes, needs accounts
+nobody has given me, and three of its mandatory fields would have to be filled with
+something adjacent to true. The checklist says exactly what is left; none of it is code.
+
 Morning re-run on Base Sepolia, mainnet link re-resolved, `verifyReceiptChain` re-run, repo
 tagged, `receipts/` committed, `.env` absent from history. Then BUIDL #1 on the main track
 by 10:30 and BUIDL #2 for the bounty by 11:15 — separate submissions, as the rules require —

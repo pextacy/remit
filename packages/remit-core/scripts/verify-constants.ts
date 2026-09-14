@@ -64,7 +64,7 @@ let failures = 0;
  * Public RPCs rate-limit, and a rate-limited read is not a constant that changed.
  * Without this, the script that exists to catch drift would occasionally invent some.
  */
-async function retry<T>(what: string, read: () => Promise<T>, attempts = 4): Promise<T> {
+async function retry<T>(what: string, read: () => Promise<T>, attempts = 6): Promise<T> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
@@ -72,7 +72,10 @@ async function retry<T>(what: string, read: () => Promise<T>, attempts = 4): Pro
     } catch (error) {
       lastError = error;
       if (attempt < attempts) {
-        await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+        // Linear, then long: a public endpoint that is rate-limiting wants seconds, not
+        // milliseconds, and this script runs before a mainnet execution rather than in a
+        // loop.
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt * attempt));
       }
     }
   }
@@ -92,8 +95,21 @@ async function hasCode(client: PublicClient, address: Address): Promise<number> 
   return code === undefined ? 0 : (code.length - 2) / 2;
 }
 
+/**
+ * A private endpoint when one is configured, the public one otherwise.
+ *
+ * The public Base RPCs rate-limit, and this script is the one that runs immediately
+ * before a mainnet execution — the moment when "could not read" must not be mistaken for
+ * "the constant changed". An operator with a key should be able to use it.
+ */
+function rpcFor(chainId: SupportedChainId): string {
+  const override =
+    chainId === BASE ? process.env.BASE_RPC_URL : process.env.BASE_SEPOLIA_RPC_URL;
+  return override !== undefined && override !== "" ? override : PUBLIC_RPC[chainId];
+}
+
 async function verifyChain(chainId: SupportedChainId): Promise<void> {
-  const rpc = PUBLIC_RPC[chainId];
+  const rpc = rpcFor(chainId);
   const client = createPublicClient({ transport: http(rpc) }) as PublicClient;
   process.stdout.write(`\nchain ${chainId} via ${rpc}\n`);
 
