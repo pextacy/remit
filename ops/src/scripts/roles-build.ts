@@ -6,11 +6,10 @@
  * Reading this output is the control. Applying a preset nobody read is how an agent ends
  * up with authority nobody intended.
  */
+import { buildPreset, describePreset, encodePreset } from "@remit/core";
 import { networkFrom, parseArgs } from "../lib/args.js";
 import { requireDeployment, requireField } from "../lib/deployment.js";
 import { say } from "../lib/log.js";
-import { describePreset, encodePreset } from "../roles/encode.js";
-import { buildPreset } from "../roles/preset.js";
 
 const args = parseArgs();
 const network = networkFrom(args, { readOnly: true });

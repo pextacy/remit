@@ -19,21 +19,19 @@
  */
 
 import {
-  AAVE_V3_POOL,
-  AbiType,
-  type ConditionFlat,
-  ExecutionOptions,
-  Operator,
-  type SupportedChainId,
-  USDC,
-} from "@remit/core";
-import {
   type Address,
   encodeAbiParameters,
   getAddress,
   type Hex,
   toFunctionSelector,
 } from "viem";
+import { AAVE_V3_POOL, type SupportedChainId, USDC } from "../chain/addresses.js";
+import {
+  AbiType,
+  type ConditionFlat,
+  ExecutionOptions,
+  Operator,
+} from "../chain/roles-enums.js";
 
 export type ScopedFunction = {
   /** What a human calls it, for `roles:diff` output. */

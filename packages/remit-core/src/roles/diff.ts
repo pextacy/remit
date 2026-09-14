@@ -10,14 +10,14 @@
  * role can do, in the same words the preset uses, and a widening is called a widening.
  */
 
+import { type Address, getAddress, type Hex } from "viem";
+import { canonicalJson } from "../canonical/json.js";
 import {
   Clearance,
   type ConditionFlat,
-  canonicalJson,
   ExecutionOptions,
   Operator,
-} from "@remit/core";
-import { type Address, getAddress, type Hex } from "viem";
+} from "../chain/roles-enums.js";
 import type { OnChainFunction, OnChainRole } from "./onchain.js";
 import type { Preset, ScopedFunction } from "./preset.js";
 

@@ -336,11 +336,78 @@ checking the switch would be told what they wanted to hear.
 
 ---
 
+## 14. The Almanak seam, served
+
+Read from the SDK at the pinned version and then exercised with the SDK's own client on
+2026-09-14, against a fork of Base Sepolia.
+
+What the runner actually sends
+(`almanak/framework/runner/_inner_runner_helpers.py`, lines 180-290):
+
+```python
+execution.CompileIntent(CompileIntentRequest(
+    intent_type=intent_type,                       # "SUPPLY"
+    intent_data=json.dumps(intent_params).encode(),# the serialised intent, as JSON
+    chain=chain, wallet_address=wallet, price_map=price_map))
+
+execution.Execute(ExecuteRequest(
+    action_bundle=compile_resp.action_bundle,      # whatever the server returned
+    dry_run=…, simulation_enabled=…, deployment_id=…, chain=…, wallet_address=…))
+```
+
+`action_bundle` is opaque to Almanak — the server defines it, and here the server is
+Remit. That is the whole reason this integration needs no fork of the SDK: Remit answers
+`ExecutionServiceServicer`, and a strategy is pointed at it with `ALMANAK_GATEWAY_HOST`
+and `ALMANAK_GATEWAY_PORT`.
+
+Observed, with `remit serve` on one side and `almanak.framework.gateway_client.GatewayClient`
+on the other:
+
+| Sent | Answer |
+|---|---|
+| The strategy's own `SUPPLY 5 USDC` | `CompileIntent` success → `Execute(dry_run)` → G1 pass, G2 pass, receipt `observed` |
+| `protocol: "compound_v3"` | `PROTOCOL_UNSUPPORTED` — the preset scopes Aave v3 only |
+| `amount: "500"` | `REMIT_CAP_EXCEEDED_PER_TX` — G1, against a 5 USD cap |
+| `amount: "all"` | `AMOUNT_CHAINED` — the value comes from a previous step the adapter does not have, and it will not guess |
+| `token: "WETH"` | `ASSET_UNSUPPORTED` |
+| A `SUPPLY` with no ERC-20 allowance in place | G1 pass, then G2 `ModuleTransactionFailed()` — the role allowed it, the call itself would fail |
+
+Two details from the SDK worth carrying:
+
+- The SDK **warns that symbol-based token references are deprecated** and will be rejected
+  in Almanak 3.0. The adapter therefore accepts either `"USDC"` or the token *address* —
+  but an address only when it equals the one in `docs/VERIFIED.md` §4 for that chain. A
+  strategy still cannot name a token nobody verified.
+- `amount` can legitimately be the string `"all"`, meaning "whatever the previous step
+  produced". The adapter refuses it rather than substituting a balance, because the
+  number it would substitute is not the number the strategy meant.
+
+## 15. Two drift refusals at startup
+
+`remit serve` checks the world before it accepts an intent, and refuses to run on either
+kind of drift. Both observed on 2026-09-14:
+
+| Drift | What it did |
+|---|---|
+| `withdraw` revoked on chain after the Remit was issued | `REMIT_PRESET_DRIFT: 1 difference(s) …` — refused to start (RM-4) |
+| the strategy file edited after the Remit was issued | `REMIT_STRATEGY_DRIFT` — the file hashes to `0xd97a79…`, the Remit binds `0x8431b1…`, refused to start |
+
+The second is the one that keeps `strategyHash` honest. A receipt claims that *this*
+source produced *that* transaction; a bridge that runs an edited strategy under an old
+Remit would be writing receipts that name source which did not produce them, and
+provenance is the one claim that cannot survive being approximately true.
+
+Recovery is the same for both, and it is never "widen something": reissue the Remit
+against what is actually there, or put back what the Remit binds.
+
+---
+
 ## Re-verification log
 
 | Date | What | Result |
 |---|---|---|
 | 2026-09-13 | Full P0 pass: 24 chain assertions across 8453 and 84532 | all pass |
+| 2026-09-14 | P5: the strategy decided and its intent crossed Almanak's own client into `remit serve`; four rogue intents refused by name; both startup drift checks refused | seam works, receipts carry the strategy hash |
 | 2026-09-14 | P4: `roles:diff` reconstructed the role from 11 events and matched the preset exactly; drift introduced and detected; kill switch pulled and restored with four receipts | diff exact, switch verified by preflight |
 | 2026-09-14 | P3: six receipts written by two programs over a fork, chain verified from Python through the TypeScript core, three tamper modes caught | chain intact, all tampers detected |
 | 2026-09-14 | P2: Remit issued and re-derived by viem, foundry and the committed file; G1 run over 19 intents covering every error code | all agree, 19/19 |

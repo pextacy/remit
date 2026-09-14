@@ -7,15 +7,20 @@
  * is printed before anything is sent; `roles:diff` in P4 will make that a real diff
  * against what is already on chain rather than a description of what we are about to do.
  */
+import {
+  buildPreset,
+  describePreset,
+  diffRole,
+  encodePreset,
+  readRole,
+  renderDiff,
+} from "@remit/core";
 import { castFor } from "../lib/actors.js";
 import { networkFrom, parseArgs } from "../lib/args.js";
+import { publicClientFor } from "../lib/clients.js";
 import { requireDeployment, requireField, writeDeployment } from "../lib/deployment.js";
 import { fail, logEvent, say } from "../lib/log.js";
 import { execSafeTx, safeCall } from "../lib/safe.js";
-import { diffRole, renderDiff } from "../roles/diff.js";
-import { describePreset, encodePreset } from "../roles/encode.js";
-import { readRole } from "../roles/onchain.js";
-import { buildPreset } from "../roles/preset.js";
 
 const args = parseArgs();
 const network = networkFrom(args);
@@ -36,7 +41,7 @@ say("");
  * The second is the one that catches a preset that was edited in a way nobody intended,
  * and it costs one event scan.
  */
-const onChain = await readRole(network, rolesModifier, roleKey, {
+const onChain = await readRole(publicClientFor(network), rolesModifier, roleKey, {
   fromBlock: BigInt(deployment.rolesDeployedBlock ?? 0),
 });
 const deltas = diffRole(preset, onChain);

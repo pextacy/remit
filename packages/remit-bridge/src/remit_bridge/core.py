@@ -109,6 +109,67 @@ def check_envelope(
     return decision
 
 
+def preflight(
+    *,
+    rpc_url: str,
+    roles_modifier: str,
+    role_key: str,
+    agent: str,
+    target: str,
+    calldata: str,
+) -> dict[str, Any]:
+    """G2. One `eth_call`, no gas, and a named reason when the answer is no.
+
+    The bridge does not hold a chain client of its own. That is not squeamishness: a
+    second implementation of "would the Roles Modifier allow this" is a second answer,
+    and the gate an operator reads has to be the gate that ran.
+    """
+    answer, _code = invoke(
+        "preflight",
+        {
+            "rpcUrl": rpc_url,
+            "rolesModifier": roles_modifier,
+            "roleKey": role_key,
+            "agent": agent,
+            "target": target,
+            "calldata": calldata,
+        },
+    )
+    return answer
+
+
+def check_preset(
+    *,
+    rpc_url: str,
+    chain_id: int,
+    remit: dict[str, Any],
+    limits: dict[str, Any],
+    roles_modifier: str,
+    agent: str,
+    from_block: int | None = None,
+) -> dict[str, Any]:
+    """RM-4. Does the chain still say what the Remit claims it says?"""
+    payload: dict[str, Any] = {
+        "rpcUrl": rpc_url,
+        "chainId": chain_id,
+        "remit": remit,
+        "limits": limits,
+        "rolesModifier": roles_modifier,
+        "agent": agent,
+    }
+    if from_block is not None:
+        payload["fromBlock"] = from_block
+    answer, _code = invoke("preset:check", payload)
+    check: dict[str, Any] = answer.get("check", {"ok": False, "findings": []})
+    return check
+
+
+def tx_status(*, rpc_url: str, tx_hash: str) -> dict[str, Any]:
+    """What the chain says about a transaction. A read, with no rules in it."""
+    answer, _code = invoke("tx:status", {"rpcUrl": rpc_url, "txHash": tx_hash})
+    return answer
+
+
 def append_receipt(directory: Path, body: dict[str, Any]) -> dict[str, Any]:
     """Append to the chain. `sequence` and `prevHash` are assigned by the store."""
     answer, _code = invoke("receipt:append", {"dir": str(directory), "body": body})

@@ -10,12 +10,11 @@
  * Reads only. It cannot change anything, which is why it is safe to run against mainnet
  * without a flag.
  */
+import { buildPreset, diffRole, readRole, renderDiff } from "@remit/core";
 import { networkFrom, option, parseArgs } from "../lib/args.js";
+import { publicClientFor } from "../lib/clients.js";
 import { requireDeployment, requireField } from "../lib/deployment.js";
 import { logEvent, say } from "../lib/log.js";
-import { diffRole, renderDiff } from "../roles/diff.js";
-import { readRole } from "../roles/onchain.js";
-import { buildPreset } from "../roles/preset.js";
 
 const args = parseArgs();
 const network = networkFrom(args, { readOnly: true });
@@ -28,7 +27,9 @@ const fromBlock = BigInt(
   option(args, "from-block") ?? String(deployment.rolesDeployedBlock ?? 0),
 );
 
-const onChain = await readRole(network, rolesModifier, roleKey, { fromBlock });
+const onChain = await readRole(publicClientFor(network), rolesModifier, roleKey, {
+  fromBlock,
+});
 const preset = buildPreset(network.chainId, roleKey);
 const deltas = diffRole(preset, onChain);
 

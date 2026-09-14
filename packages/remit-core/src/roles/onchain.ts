@@ -15,10 +15,9 @@
  * about to send.
  */
 
-import { Clearance, type ConditionFlat, ExecutionOptions, rolesAbi } from "@remit/core";
-import { type Address, getAddress, type Hex } from "viem";
-import { publicClientFor } from "../lib/clients.js";
-import type { Network } from "../lib/networks.js";
+import { type Address, getAddress, type Hex, type PublicClient } from "viem";
+import { rolesAbi } from "../chain/abi/roles.js";
+import { Clearance, type ConditionFlat, ExecutionOptions } from "../chain/roles-enums.js";
 
 export type OnChainFunction = {
   readonly selector: Hex;
@@ -59,15 +58,17 @@ type MutableTarget = {
  * `eth_getLogs`, so the scan is chunked rather than asked for in one call.
  */
 export async function readRole(
-  network: Network,
+  client: PublicClient,
   rolesModifier: Address,
   roleKey: Hex,
   options: { fromBlock?: bigint; chunk?: bigint } = {},
 ): Promise<OnChainRole> {
-  const client = publicClientFor(network);
   const latest = await client.getBlockNumber();
   const fromBlock = options.fromBlock ?? 0n;
-  const chunk = options.chunk ?? 50_000n;
+  // 10,000 is the range cap the public Base RPCs enforce (and that an anvil fork
+  // forwards). Asking for more gets a 413 with a message nobody reads until they have
+  // lost twenty minutes to it.
+  const chunk = options.chunk ?? 10_000n;
 
   const targets = new Map<Address, MutableTarget>();
   const members = new Map<Address, boolean>();

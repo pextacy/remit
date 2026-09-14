@@ -33,6 +33,10 @@ class Deployment:
     roles_modifier: str
     role_key: str
     agent_signer: str
+    #: Where to start replaying the Roles Modifier's events. Everything before the
+    #: instance existed is, by definition, not about this role — and scanning from zero
+    #: is how a public RPC's range cap is discovered the hard way.
+    roles_deployed_block: int | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,9 @@ def load_deployment(network: str) -> Deployment:
         roles_modifier=str(raw["rolesModifier"]),
         role_key=str(raw["roleKey"]),
         agent_signer=str(raw["agentSigner"]),
+        roles_deployed_block=(
+            int(raw["rolesDeployedBlock"]) if raw.get("rolesDeployedBlock") else None
+        ),
     )
 
 

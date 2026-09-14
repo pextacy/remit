@@ -22,11 +22,13 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from remit_bridge import core, receipts
 from remit_bridge.config import (
     CHAIN_IDS,
+    REPO_ROOT,
     load_deployment,
     load_remit,
     receipts_dir,
@@ -43,12 +45,16 @@ from remit_bridge.keeperhub import KeeperHubClient
 
 
 def _log(event: str, **fields: Any) -> None:
-    """Structured logging: one JSON object per line (CLAUDE.md §5)."""
-    print(json.dumps({"event": event, **fields}))
+    """Structured logging: one JSON object per line (CLAUDE.md §5).
+
+    Flushed, because `remit serve` is a long-running process: a server whose startup
+    lines only appear when it exits is a server nobody can tell is up.
+    """
+    print(json.dumps({"event": event, **fields}), flush=True)
 
 
 def _say(line: str) -> None:
-    print(line)
+    print(line, flush=True)
 
 
 def _build_intent(kind: str, amount_units: str, counterparty: str) -> dict[str, Any]:
@@ -269,6 +275,114 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0 if resolution.succeeded else 4
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Run the gateway an Almanak strategy talks to.
+
+    Before it accepts a single intent it checks that the chain still says what the Remit
+    claims it says (RM-4). A bridge that starts on drift is a bridge enforcing limits
+    nobody is bound by: the Remit would promise the operator a recipient allowlist that
+    the preset had stopped enforcing, and every gate downstream would agree with it.
+    """
+    from remit_bridge.adapters import almanak
+
+    deployment = load_deployment(args.network)
+    bundle = load_remit(args.network)
+    rpc_url = almanak.env_rpc_url(args.network)
+
+    check = core.check_preset(
+        rpc_url=rpc_url,
+        chain_id=deployment.chain_id,
+        remit=bundle.remit,
+        limits=bundle.limits,
+        roles_modifier=deployment.roles_modifier,
+        agent=deployment.agent_signer,
+        from_block=deployment.roles_deployed_block,
+    )
+
+    _say(f"remit      {bundle.remit_hash}")
+    _say(f"safe       {deployment.safe}")
+    _say(f"roles      {deployment.roles_modifier}  role {deployment.role_key}")
+    events = check.get("eventsReplayed")
+    _say(f"chain read {events} event(s), as of block {check.get('asOfBlock')}")
+
+    if not check.get("ok"):
+        for finding in check.get("findings", []):
+            _say(f"DRIFT      {finding.get('code')}: {finding.get('detail')}")
+        _log("startup.refused", code="REMIT_PRESET_DRIFT", findings=check.get("findings"))
+        _say("")
+        _say(
+            "refusing to start: the Remit and the chain disagree. Fix the preset with "
+            "`roles:diff` and `roles:apply`, or reissue the Remit — do not widen either "
+            "to make this pass."
+        )
+        return 5
+
+    _say("preset     agrees with the Remit — the limits are enforced by the chain")
+
+    # AL-1/AL-4: the Remit binds a *version* of the strategy. If the file on disk no
+    # longer hashes to it, the receipts this run would write would name source that did
+    # not produce them, and provenance is the one claim that cannot survive being
+    # approximately true.
+    strategy_path = Path(args.strategy).resolve()
+    answer, _ = core.invoke("hash", {"file": str(strategy_path)})
+    running = str(answer.get("fileHash", ""))
+    bound = str(bundle.remit["strategyHash"])
+
+    if running != bound:
+        _say(f"strategy   {strategy_path}")
+        _say(f"           hashes to {running}")
+        _say(f"           the Remit binds {bound}")
+        _log("startup.refused", code="REMIT_STRATEGY_DRIFT", running=running, bound=bound)
+        _say("")
+        _say(
+            "refusing to start: this is not the strategy the Remit authorises. Reissue "
+            "the Remit against this file, or check out the version it binds."
+        )
+        return 5
+
+    _say(f"strategy   {strategy_path.name} matches the Remit's strategyHash")
+
+    keeperhub = None
+    api_key = os.environ.get("KEEPERHUB_API_KEY", "")
+    if api_key:
+        keeperhub = KeeperHubClient(
+            api_key,
+            base_url=os.environ.get("KEEPERHUB_BASE_URL", "https://app.keeperhub.com"),
+        )
+        _say("keeperhub  configured")
+    else:
+        # Started without credentials, the gateway still answers CompileIntent and a
+        # dry-run Execute — G1 and G2 both run. It refuses a real Execute rather than
+        # finding another way to send, which is the whole point of KH-1.
+        _say("keeperhub  NOT configured — dry runs only, no transaction can be submitted")
+
+    server = almanak.serve(
+        deployment=deployment,
+        bundle=bundle,
+        rpc_url=rpc_url,
+        keeperhub=keeperhub,
+        workflow_id=os.environ.get("KEEPERHUB_WORKFLOW_ID") or None,
+        host=args.host,
+        port=args.port,
+    )
+
+    _say("")
+    _say(f"listening  {args.host}:{args.port}")
+    _say("point a strategy at it with:")
+    _say(f"  ALMANAK_GATEWAY_HOST={args.host} ALMANAK_GATEWAY_PORT={args.port}")
+    _log("serve.started", network=args.network, host=args.host, port=args.port)
+
+    if args.once:
+        # Used by the driver: start, hand control back, let the caller stop it.
+        return 0
+
+    try:
+        server.wait_for_termination()
+    except KeyboardInterrupt:
+        server.stop(grace=1.0)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="remit", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -276,6 +390,18 @@ def main(argv: list[str] | None = None) -> int:
     verify = sub.add_parser("verify", help="check the receipt chain")
     verify.add_argument("--network", default="base-sepolia")
     verify.set_defaults(handler=cmd_verify)
+
+    serve = sub.add_parser("serve", help="run the gateway an Almanak strategy talks to")
+    serve.add_argument("--network", default="base-sepolia")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=50_051)
+    serve.add_argument(
+        "--strategy",
+        default=str(REPO_ROOT / "strategies" / "remit_usdc_lender" / "strategy.py"),
+        help="the strategy file whose hash the Remit binds",
+    )
+    serve.add_argument("--once", action="store_true", help=argparse.SUPPRESS)
+    serve.set_defaults(handler=cmd_serve)
 
     run = sub.add_parser("run", help="put one intent through the gates and KeeperHub")
     run.add_argument("--network", default="base-sepolia")

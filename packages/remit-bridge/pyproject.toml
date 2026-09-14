@@ -33,8 +33,9 @@ src = ["src"]
 select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "T20", "RET", "SIM", "ARG", "PTH"]
 
 [tool.ruff.lint.per-file-ignores]
-# The CLI is the one place that is allowed to print to an operator.
+# The CLI and the driver are the places that talk to an operator directly.
 "src/remit_bridge/cli.py" = ["T20"]
+"src/remit_bridge/drive.py" = ["T20"]
 # N818 wants every exception to end in "Error". These names are fixed by the spec —
 # PRD.md KH-4 says the ambiguity case raises `ReceiptUnresolvable` — and matching the
 # document a reviewer is reading is worth more than the suffix convention.

@@ -4,7 +4,7 @@ Verification tasks that are blocked, and decisions the P0 pass forced but cannot
 alone. The rule that produced this file: when a value cannot be verified against a live
 source, write the task down and stop — do not guess (CLAUDE.md §2.2).
 
-Status as of **2026-09-14**, end of the P1 pass.
+Status as of **2026-09-14**, end of the P5 pass.
 
 ---
 
@@ -67,6 +67,21 @@ in place to close it in minutes once there is a key:
 
 The scripts are network-agnostic; the fork path and the testnet path differ only in where
 the signing authority comes from.
+
+### OQ-8 — the strategy-driven transaction still needs KeeperHub
+
+P5's exit gate asks for a transaction hash produced by the strategy through the adapter.
+Everything up to the submission is done and observed on a fork: the strategy decides, its
+intent crosses Almanak's own client into `remit serve`, G1 and G2 both run, and a receipt
+is written. `Execute` with `dry_run=False` then stops at the same wall as everything else
+— KeeperHub is the only path that submits, and there is no account (OQ-1).
+
+It is deliberately not routed around. The bridge has no local-signer path and CI fails the
+build if one appears; a fork-only fallback would make KH-1 false in exactly the case where
+it matters.
+
+**Unblocks with OQ-1**, and needs nothing else: `remit serve` with `KEEPERHUB_API_KEY` set,
+then `python -m remit_bridge.drive --network base-sepolia` without `--dry-run`.
 
 ### OQ-2 — DoraHacks registration, Discord, office hours
 

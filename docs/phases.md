@@ -277,6 +277,28 @@ drift.
 
 **Closes** AL-1, AL-2, AL-3, AL-4, RM-4.
 
+**Status — 2026-09-14: complete, except the public-testnet transaction hash, which is the
+same blocker as P1's (OQ-6) and P3's (OQ-1).**
+
+| Task | State |
+|---|---|
+| 3.1 The adapter | done — `ExecutionServiceServicer` from Almanak's own generated stubs. A strategy reaches it through `ALMANAK_GATEWAY_HOST`/`PORT`; no fork of the SDK, no patched strategy |
+| 3.2 A pinned strategy | done — `strategies/remit_usdc_lender/strategy.py`, an unmodified `IntentStrategy` with no Remit imports, hashed into the Remit |
+| 3.3 End to end | done on a fork: the strategy read the Safe's real balance, decided `SUPPLY 5 USDC`, and its serialised intent crossed Almanak's own `GatewayClient` into Remit, through G1 and G2. `Execute` without `dry_run` needs KeeperHub, which needs an account (OQ-1) |
+| 3.4 Startup drift assertion | done — and doubled: the bridge refuses to start on preset drift (RM-4) *and* on strategy drift |
+
+**AL-3 is enforced by what the adapter is missing.** It maps one Almanak intent onto one
+typed Remit intent and refuses what it does not recognise — an unknown protocol, an
+unknown token, a chained `amount: "all"`. It decides nothing about markets, sizing or
+timing, because a bridge that second-guesses a strategy is a second strategy nobody
+reviewed.
+
+The rogue intents matter as much as the happy path: four crafted intents went through the
+same client and the same seam, and came back `PROTOCOL_UNSUPPORTED`,
+`REMIT_CAP_EXCEEDED_PER_TX`, `AMOUNT_CHAINED` and `ASSET_UNSUPPORTED`. None of them
+bypassed anything; that is the point of sending them through the front door, and it is the
+material P8 needs.
+
 **Exit gate**
 - A Base Sepolia transaction hash produced by the strategy through the adapter.
 - Tightening the preset by hand causes the bridge to refuse to start, with

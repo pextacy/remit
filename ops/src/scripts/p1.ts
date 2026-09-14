@@ -15,6 +15,9 @@
 
 import {
   AAVE_V3_POOL_ADDRESSES_PROVIDER,
+  buildPreset,
+  describePreset,
+  encodePreset,
   erc20Abi,
   USDC,
   USDC_DECIMALS,
@@ -50,8 +53,6 @@ import {
   isRoleMember,
 } from "../lib/roles.js";
 import { deploySafe, execSafeTx, safeCall } from "../lib/safe.js";
-import { describePreset, encodePreset } from "../roles/encode.js";
-import { buildPreset } from "../roles/preset.js";
 
 const TOKEN_MINT_ABI = [
   {

@@ -70,10 +70,17 @@ jobs:
                packages/remit-core/src/schema/intent.ts; then
             echo "::error::intent schema gained an unconstrained field"; exit 1
           fi
-          # Bytes are built in exactly one place, from ABIs that were verified on chain.
-          builders=$(grep -rl 'encodeFunctionData' packages/remit-core/src | grep -v 'src/compile/' || true)
+          # Calldata built from an *intent* happens in exactly one module, from ABIs
+          # verified on chain. `src/roles/encode.ts` also encodes calls — the owner
+          # transactions that apply a preset — but it never sees an intent, and the
+          # check below keeps it that way.
+          builders=$(grep -rl 'encodeFunctionData' packages/remit-core/src \
+            | grep -v 'src/compile/' | grep -v 'src/roles/encode.ts' || true)
           if [ -n "$builders" ]; then
             echo "::error::calldata is built outside src/compile: $builders"; exit 1
+          fi
+          if grep -rn "schema/intent" packages/remit-core/src/roles/; then
+            echo "::error::the preset encoder gained a path from an intent to calldata"; exit 1
           fi
           echo "clean"
 

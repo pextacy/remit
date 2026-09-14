@@ -7,8 +7,10 @@
  * two together, from one source.
  */
 
-import { Clearance, ROLES_STATUS, rolesAbi } from "@remit/core";
 import { type Address, encodeFunctionData, type Hex } from "viem";
+import { rolesAbi } from "../chain/abi/roles.js";
+import { Clearance } from "../chain/roles-enums.js";
+import { ROLES_STATUS } from "../chain/roles-status.js";
 import type { Preset } from "./preset.js";
 
 export type PresetCall = {
