@@ -527,6 +527,8 @@ def env_rpc_url(network: str) -> str:
     """The RPC the gates read the chain through."""
     if network == "anvil":
         return os.environ.get("ANVIL_RPC_URL", "http://127.0.0.1:8545")
+    if network == "anvil-base":
+        return os.environ.get("ANVIL_BASE_RPC_URL", "http://127.0.0.1:8547")
     if network == "base-sepolia":
         return os.environ.get("BASE_SEPOLIA_RPC_URL", "https://sepolia.base.org")
     url = os.environ.get("BASE_RPC_URL", "")

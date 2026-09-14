@@ -19,6 +19,7 @@ import {
   type PublicClient,
 } from "viem";
 import {
+  AAVE_V3_A_USDC,
   AAVE_V3_POOL,
   AAVE_V3_POOL_ADDRESSES_PROVIDER,
   aavePoolAbi,
@@ -37,6 +38,16 @@ import {
   USDC_DECIMALS,
 } from "../src/index.js";
 
+const A_TOKEN_ABI = [
+  {
+    type: "function",
+    name: "UNDERLYING_ASSET_ADDRESS",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+] as const;
+
 const SAFE_VERSION_ABI = [
   {
     type: "function",
@@ -48,6 +59,27 @@ const SAFE_VERSION_ABI = [
 ] as const;
 
 let failures = 0;
+
+/**
+ * Public RPCs rate-limit, and a rate-limited read is not a constant that changed.
+ * Without this, the script that exists to catch drift would occasionally invent some.
+ */
+async function retry<T>(what: string, read: () => Promise<T>, attempts = 4): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await read();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+      }
+    }
+  }
+  throw new Error(
+    `${what} could not be read after ${attempts} attempts: ${String(lastError)}`,
+  );
+}
 
 function check(label: string, ok: boolean, detail: string): void {
   const mark = ok ? "ok  " : "FAIL";
@@ -65,7 +97,7 @@ async function verifyChain(chainId: SupportedChainId): Promise<void> {
   const client = createPublicClient({ transport: http(rpc) }) as PublicClient;
   process.stdout.write(`\nchain ${chainId} via ${rpc}\n`);
 
-  const observed = await client.getChainId();
+  const observed = await retry("eth_chainId", () => client.getChainId());
   check("eth_chainId matches", observed === chainId, String(observed));
 
   for (const [label, address] of [
@@ -75,7 +107,7 @@ async function verifyChain(chainId: SupportedChainId): Promise<void> {
     ["safe l2 singleton", SAFE_L2_SINGLETON],
     ["safe proxy factory", SAFE_PROXY_FACTORY],
   ] as const) {
-    const size = await hasCode(client, getAddress(address));
+    const size = await retry(label, () => hasCode(client, getAddress(address)));
     check(`${label} has code`, size > 0, `${size} bytes`);
   }
 
@@ -83,27 +115,43 @@ async function verifyChain(chainId: SupportedChainId): Promise<void> {
     ["safe singleton", SAFE_SINGLETON],
     ["safe l2 singleton", SAFE_L2_SINGLETON],
   ] as const) {
-    const version = await client.readContract({
-      address: getAddress(address),
-      abi: SAFE_VERSION_ABI,
-      functionName: "VERSION",
-    });
+    const version = await retry(`${label} VERSION`, () =>
+      client.readContract({
+        address: getAddress(address),
+        abi: SAFE_VERSION_ABI,
+        functionName: "VERSION",
+      }),
+    );
     check(`${label} VERSION`, version === SAFE_VERSION, version);
   }
 
   const usdc = getAddress(USDC[chainId]);
-  const [symbol, decimals] = await Promise.all([
+  const symbol = await retry("usdc symbol", () =>
     client.readContract({ address: usdc, abi: erc20Abi, functionName: "symbol" }),
+  );
+  const decimals = await retry("usdc decimals", () =>
     client.readContract({ address: usdc, abi: erc20Abi, functionName: "decimals" }),
-  ]);
+  );
   check("usdc symbol", symbol === "USDC", symbol);
   check("usdc decimals", decimals === USDC_DECIMALS, String(decimals));
 
-  const provider = await client.readContract({
-    address: getAddress(AAVE_V3_POOL[chainId]),
-    abi: aavePoolAbi,
-    functionName: "ADDRESSES_PROVIDER",
-  });
+  const aToken = getAddress(AAVE_V3_A_USDC[chainId]);
+  const underlying = await retry("aUSDC underlying", () =>
+    client.readContract({
+      address: aToken,
+      abi: A_TOKEN_ABI,
+      functionName: "UNDERLYING_ASSET_ADDRESS",
+    }),
+  );
+  check("aUSDC underlying is USDC", getAddress(underlying) === usdc, underlying);
+
+  const provider = await retry("aave ADDRESSES_PROVIDER", () =>
+    client.readContract({
+      address: getAddress(AAVE_V3_POOL[chainId]),
+      abi: aavePoolAbi,
+      functionName: "ADDRESSES_PROVIDER",
+    }),
+  );
   const expected = getAddress(AAVE_V3_POOL_ADDRESSES_PROVIDER[chainId]);
   check("aave pool ADDRESSES_PROVIDER", getAddress(provider) === expected, provider);
 }

@@ -79,6 +79,23 @@ export const USDC: Readonly<Record<SupportedChainId, `0x${string}`>> = {
 
 export const USDC_DECIMALS = 6 as const;
 
+/**
+ * Aave's interest-bearing USDC token, per chain.
+ *
+ * Source: aave-dao/aave-address-book, `USDC.A_TOKEN`, commit
+ * `02748a20592a019e834aee193b6c40c9bc7bd059`. Both answer
+ * `UNDERLYING_ASSET_ADDRESS()` with the `USDC` address above. Verified 2026-09-14.
+ *
+ * Not used by the product. It is the only thing here that exists for the rehearsal: on a
+ * fork of Base mainnet there is no faucet and Circle's USDC has no public `mint`, so the
+ * Safe is funded by impersonating this contract — which really does hold millions of real
+ * USDC — and transferring. Forked real state, moved by its real holder.
+ */
+export const AAVE_V3_A_USDC: Readonly<Record<SupportedChainId, `0x${string}`>> = {
+  [BASE]: "0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB",
+  [BASE_SEPOLIA]: "0x10F1A9D11CDf50041f3f8cB7191CBE2f31750ACC",
+};
+
 /** Public RPC endpoints, used only for verification probes. Real runs use $BASE_RPC_URL. */
 export const PUBLIC_RPC: Readonly<Record<SupportedChainId, string>> = {
   [BASE]: "https://mainnet.base.org",

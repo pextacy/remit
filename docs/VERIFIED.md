@@ -402,11 +402,48 @@ against what is actually there, or put back what the Remit binds.
 
 ---
 
+## 16. The mainnet path, rehearsed on Base
+
+Run on 2026-09-14 against a fork of **Base mainnet** — chain 8453, the real Roles
+mastercopy, Circle's real USDC, the real Aave v3 pool. Not a testnet analogue: the
+addresses, the preset and the caps are the ones the real run will use, and the only thing
+that differs is whose money it is.
+
+| Step | Result |
+|---|---|
+| Safe deployed through the canonical v1.4.1 factory | 2-of-3, 306,183 gas |
+| Roles v2 proxy deployed, enabled, agent assigned | 191,158 + 107,518 + 126,786 gas |
+| Preset applied with mainnet addresses | USDC `0x833589fC…`, Aave pool `0xA238Dd80…`, 742,144 gas over five owner transactions |
+| `roles:diff` after applying | no difference |
+| Safe funded with 30 USDC | by impersonating a contract holding real USDC and transferring — forked real state moved by its real holder |
+| Remit issued | caps 5 / 25 USD, `chainId` 8453 |
+| `mainnet:preflight` | 15 of 16 checks pass; the one that does not is `KEEPERHUB_API_KEY` (OQ-1) |
+| `approve` through the role | executed, 114,110 gas |
+| `supply` through the role | executed, 285,436 gas, value left the Safe into Aave |
+| Receipt chain | verifies |
+
+Total for the whole sequence: **1,873,335 gas**, about **0.0000112 ETH** at the 0.006 gwei
+price observed on Base that day. Gas is not the constraint; the 30 USDC is.
+
+Two things the rehearsal settled that a testnet run could not:
+
+- Circle's USDC on Base has an `owner` but **minting requires a configured minter with an
+  allowance**, so the funding path that works on Base Sepolia's Aave test token reverts
+  here. `fund` now tries the minter and falls back to a real holder.
+- The mainnet preset is not the testnet preset with different numbers: it names different
+  contracts, and `buildPreset(8453, …)` producing the right ones is the thing that had
+  not been exercised until now.
+
+The runbook, the costs and the preconditions are in docs/MAINNET.md.
+
+---
+
 ## Re-verification log
 
 | Date | What | Result |
 |---|---|---|
 | 2026-09-13 | Full P0 pass: 24 chain assertions across 8453 and 84532 | all pass |
+| 2026-09-14 | P6: the whole mainnet sequence rehearsed on a fork of Base mainnet — deploy, preset, fund, issue, preflight, two executions through the role | works at chain 8453; the public transaction still needs a funded key and KeeperHub |
 | 2026-09-14 | P5: the strategy decided and its intent crossed Almanak's own client into `remit serve`; four rogue intents refused by name; both startup drift checks refused | seam works, receipts carry the strategy hash |
 | 2026-09-14 | P4: `roles:diff` reconstructed the role from 11 events and matched the preset exactly; drift introduced and detected; kill switch pulled and restored with four receipts | diff exact, switch verified by preflight |
 | 2026-09-14 | P3: six receipts written by two programs over a fork, chain verified from Python through the TypeScript core, three tamper modes caught | chain intact, all tampers detected |

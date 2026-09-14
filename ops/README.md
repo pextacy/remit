@@ -51,9 +51,23 @@ pnpm --filter ops kill --network base-sepolia --restore
 
 ## Mainnet
 
+The runbook, the measured costs and the preconditions are in **docs/MAINNET.md**. The
+short version:
+
 ```bash
+pnpm --filter ops mainnet:preflight --network base    # sixteen checks, all must pass
 pnpm --filter ops exec:mainnet --network base \
   --remit 0x… --kind supply --amount 5 --confirm
+```
+
+Rehearse it against a fork of Base mainnet first — same addresses, same preset, same
+ceremony, nobody's money:
+
+```bash
+anvil --fork-url https://mainnet.base.org --port 8547
+export ANVIL_BASE_RPC_URL=http://127.0.0.1:8547
+pnpm --filter ops safe:deploy --network anvil-base --salt remit-mainnet
+# … see docs/MAINNET.md
 ```
 
 Four separate acts of intent before anything is sent: the network named explicitly,

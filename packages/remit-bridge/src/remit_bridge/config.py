@@ -20,7 +20,13 @@ RECEIPTS_ROOT = REPO_ROOT / "receipts"
 REMITS_ROOT = REPO_ROOT / "ops" / "remits"
 DEPLOYMENTS_ROOT = REPO_ROOT / "ops" / "deployments"
 
-CHAIN_IDS: dict[str, int] = {"anvil": 84_532, "base-sepolia": 84_532, "base": 8453}
+CHAIN_IDS: dict[str, int] = {
+    "anvil": 84_532,
+    # A fork of Base mainnet, where the mainnet run is rehearsed.
+    "anvil-base": 8453,
+    "base-sepolia": 84_532,
+    "base": 8453,
+}
 
 
 @dataclass(frozen=True)

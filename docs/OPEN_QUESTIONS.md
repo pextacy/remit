@@ -4,7 +4,7 @@ Verification tasks that are blocked, and decisions the P0 pass forced but cannot
 alone. The rule that produced this file: when a value cannot be verified against a live
 source, write the task down and stop — do not guess (CLAUDE.md §2.2).
 
-Status as of **2026-09-14**, end of the P5 pass.
+Status as of **2026-09-14**, end of the P6 pass.
 
 ---
 
@@ -82,6 +82,26 @@ it matters.
 
 **Unblocks with OQ-1**, and needs nothing else: `remit serve` with `KEEPERHUB_API_KEY` set,
 then `python -m remit_bridge.drive --network base-sepolia` without `--dry-run`.
+
+### OQ-9 — the mainnet proof transaction
+
+The submission requirement — one transaction on Base mainnet, through KeeperHub, out of
+the Safe — is not met. It needs money and credentials, not code:
+
+1. ~0.003 ETH on Base across the owner and agent EOAs (the whole sequence is 1.87M gas,
+   about 0.0000112 ETH at current prices — the headroom is for comfort, not need).
+2. 30 USDC on Base in a wallet you control, to fund the Safe.
+3. A KeeperHub API key (OQ-1), because the product path submits through KeeperHub and
+   there is no fallback.
+
+Everything else is done and rehearsed against a fork of Base mainnet: docs/MAINNET.md is
+the runbook, `mainnet:preflight` is the go/no-go, and the only check that fails today is
+the KeeperHub one.
+
+**Do not approximate this.** A testnet hash presented as the mainnet proof, or a fork hash
+linked to Basescan, is the one failure that would deserve to sink the submission. The
+receipts from the rehearsal are gitignored for exactly that reason: they name a Safe that
+does not exist on the public chain, and a reader cannot tell that from the file.
 
 ### OQ-2 — DoraHacks registration, Discord, office hours
 

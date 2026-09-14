@@ -14,6 +14,7 @@
     "role:assign": "tsx src/scripts/assign-role.ts",
     "kill": "tsx src/scripts/kill.ts",
     "status": "tsx src/scripts/status.ts",
+    "mainnet:preflight": "tsx src/scripts/mainnet-preflight.ts",
     "remit:issue": "tsx src/scripts/remit-issue.ts",
     "remit:verify-digest": "tsx src/scripts/verify-digest.ts",
     "g1": "tsx src/scripts/g1.ts",

@@ -322,6 +322,30 @@ and recipient before proceeding.
 
 **Closes** G-1, RC-4, and acceptance criterion 1 (`PRD.md` §6).
 
+**Status — 2026-09-14: everything but the button. The transaction itself needs a funded
+key and a KeeperHub account (OQ-6, OQ-1); it is not routed around.**
+
+| Task | State |
+|---|---|
+| 3.5 Mainnet setup | **rehearsed, not done.** The full sequence — separate Safe, separate Roles instance, preset with mainnet addresses, 5/25 caps, separate Remit, 30 USDC — ran end to end on a fork of Base mainnet at chain 8453 |
+| 3.6 The proof transaction | **rehearsed, not done.** `exec:mainnet` executed `approve` and `supply` through `execTransactionWithRole` on the fork, with the full ceremony, leaving receipts |
+
+What P6 added beyond the rehearsal:
+
+- **`mainnet:preflight`** — sixteen checks that must hold before anything is spent,
+  including two that are easy to get wrong and expensive to discover late: the agent must
+  not be a Safe owner, and the preset must have **zero** drift from the Remit. Reads only,
+  so it runs before every attempt rather than once.
+- **`docs/MAINNET.md`** — the runbook, with measured gas. The whole sequence is 1,873,335
+  gas, about 0.0000112 ETH. Gas is not the constraint; the 30 USDC is.
+- **An `anvil-base` network** — a fork of Base mainnet, so the mainnet path is rehearsed
+  against the addresses it will actually use rather than against a testnet analogue. That
+  caught a real difference: Circle's USDC cannot be minted the way the Aave test token can.
+
+The exit gate is the one thing in this build that cannot be substituted for, so it is
+stated plainly rather than approximated: **there is no Base mainnet transaction yet**, and
+nothing in the repository implies there is.
+
 **Exit gate**
 - A Base mainnet transaction hash, executed through KeeperHub via `execTransactionWithRole`,
   with the Basescan link and the receipt **committed to the repository**.

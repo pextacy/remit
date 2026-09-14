@@ -8,7 +8,7 @@
 import { BASE, BASE_SEPOLIA, type SupportedChainId } from "@remit/core";
 import { fail } from "./log.js";
 
-export type NetworkName = "anvil" | "base-sepolia" | "base";
+export type NetworkName = "anvil" | "anvil-base" | "base-sepolia" | "base";
 
 export type Network = {
   readonly name: NetworkName;
@@ -30,6 +30,21 @@ export function resolveNetwork(name: string): Network {
         chainId: BASE_SEPOLIA,
         rpcUrl: process.env.ANVIL_RPC_URL ?? DEFAULT_ANVIL_RPC,
         canImpersonate: true,
+        isMainnet: false,
+      };
+    // A fork of Base **mainnet**: chain 8453's real state, real contracts, real USDC,
+    // real Aave pool. It is where the mainnet run is rehearsed — the addresses, the
+    // preset and the caps are the ones that will be used for real, and the only thing
+    // that differs is whose money it is.
+    case "anvil-base":
+      return {
+        name: "anvil-base",
+        chainId: BASE,
+        rpcUrl: process.env.ANVIL_BASE_RPC_URL ?? "http://127.0.0.1:8547",
+        canImpersonate: true,
+        // Not mainnet: nothing here reaches a public chain. The ceremony is rehearsed
+        // anyway, because a path only practised without its flags is a path nobody has
+        // practised.
         isMainnet: false,
       };
     case "base-sepolia":
@@ -55,7 +70,8 @@ export function resolveNetwork(name: string): Network {
     }
     default:
       return fail(
-        `unknown network "${name}" — expected anvil, base-sepolia or base (default: base-sepolia)`,
+        `unknown network "${name}" — expected anvil, anvil-base, base-sepolia or base ` +
+          "(default: base-sepolia)",
       );
   }
 }

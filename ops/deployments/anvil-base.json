@@ -1,0 +1,17 @@
+{
+  "network": "anvil-base",
+  "chainId": 8453,
+  "safe": "0x0765470154b1550E29eAaF1e912f1C1D844f43dD",
+  "owners": [
+    "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+    "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+    "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+  ],
+  "threshold": 2,
+  "updatedAt": "2026-09-14T06:35:24.313Z",
+  "rolesModifier": "0xa9Bb63E117AE156eE01b691082984A9eAcB1Fbf6",
+  "rolesDeployedBlock": 51289136,
+  "roleKey": "0x72656d69742d6167656e74000000000000000000000000000000000000000000",
+  "agentSigner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+  "presetAppliedAt": "2026-09-14T06:35:24.313Z"
+}
