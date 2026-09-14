@@ -491,11 +491,77 @@ written and unposted; upstream requires an accepted issue before a pull request
 
 ---
 
+## 18. The failure surface
+
+`pnpm --filter ops nh --network anvil` runs every non-happy-path requirement and writes a
+receipt for each, into the same chain as every real run. Observed on 2026-09-14:
+
+| Requirement | Evidence |
+|---|---|
+| NH-1 out-of-envelope target | `OUT_OF_REMIT_RECIPIENT`, and **0 RPC requests** made reaching that answer — counted around the gate, not asserted in prose |
+| NH-2 preset tightened after signing | `withdraw` revoked on chain; G1 passed, G2 refused with `FunctionNotAllowed`, no gas |
+| NH-3 forced out-of-preset transaction | reverted on chain, 66,979 gas, receipt carries the hash |
+| NH-4 kill switch mid-session | `NoMembership()` at G2, then reverted at G4, membership restored afterwards |
+| NH-5 daily cap exhausted | `REMIT_CAP_EXCEEDED_DAILY`, headroom **0** of 25 USD |
+| NH-6 RPC unavailable | refused after ~1s of retries against a port with nothing listening; nothing sent |
+| NH-7 three concurrent intents | see below — the interesting one |
+
+**On "bypassing" a gate.** CLAUDE.md §2.5 forbids a bypass flag and there is none. The
+gates are independent functions, and the scenario runner asks each one directly: the
+injection case puts the same poisoned intent to G1, then to G2, then to the chain. No code
+path in the product skips a gate, and nothing in the runner is reachable from `propose`,
+`exec:mainnet` or `remit serve`.
+
+### The injection scenario
+
+One input, crafted to send the Safe's USDC to an attacker. Ran twice in a row, unattended:
+
+```
+G1  REFUSED  OUT_OF_REMIT_RECIPIENT — 0 network calls, no gas
+G2  REFUSED  ParameterNotAllowed    — one eth_call, no gas
+G4  REVERTED 0x988c6c22…            — 66,979 gas, nothing moved
+             the attacker holds 0 USDC
+```
+
+Three receipts, three independent refusals, one story.
+
+### NH-7 is a finding, not a green tick
+
+Three intents fired at once on the ops-direct path: **1 of 3 landed, 2 were refused on
+nonce**. Three transactions from one EOA with nothing managing the nonce collide, and the
+client refuses rather than replacing one silently — a safe failure, and the wrong outcome
+for an execution layer.
+
+Serialised, the same three land in order (nonces 2491, 2492, 2493). Serialising is the
+work a caller has to do when nothing else manages the nonce, and it is exactly the work
+KeeperHub takes over. **This evidences the problem, not the fix**: evidencing KeeperHub's
+nonce management needs an account (OQ-1), and the receipt for it says `ops-direct` so no
+reader can mistake one for the other.
+
+### Verified from a clean clone
+
+```
+git clone . /tmp/clean-clone && cd /tmp/clean-clone && pnpm install
+uv run --directory packages/remit-bridge remit verify --network <chain>
+```
+
+Run against a fresh clone with no access to anything of ours: **18 receipts checked with
+the Remit and limits documents, chain intact**. Editing one field of one receipt and
+leaving its hash produced `selfHash does not match the receipt's own bytes` from the
+clone's own copy of the verifier.
+
+The receipts and the Remit used for that run are the rehearsal's — they are gitignored, so
+a clone gets the verifier but not yet a chain to check. The committed chain arrives with
+the first public-testnet run (OQ-6).
+
+---
+
 ## Re-verification log
 
 | Date | What | Result |
 |---|---|---|
 | 2026-09-13 | Full P0 pass: 24 chain assertions across 8453 and 84532 | all pass |
+| 2026-09-14 | P8: all seven NH requirements demonstrated with receipts; the injection scenario twice in a row; the chain verified from a clean clone and a tamper caught there | 8/8 held |
 | 2026-09-14 | P7: the policy-check action copied into a clone of `KeeperHub/keeperhub` — their type-check, their plugin discovery and their Safe unit tests all pass with it | mergeable except for tests |
 | 2026-09-14 | P6: the whole mainnet sequence rehearsed on a fork of Base mainnet — deploy, preset, fund, issue, preflight, two executions through the role | works at chain 8453; the public transaction still needs a funded key and KeeperHub |
 | 2026-09-14 | P5: the strategy decided and its intent crossed Almanak's own client into `remit serve`; four rogue intents refused by name; both startup drift checks refused | seam works, receipts carry the strategy hash |

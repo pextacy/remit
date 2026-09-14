@@ -422,6 +422,36 @@ in order.
 
 **Closes** NH-1…NH-7, RC-3 verified by a third party, acceptance criteria 2 and 3.
 
+**Status — 2026-09-14: complete, with NH-7 answered honestly rather than favourably.**
+
+`pnpm --filter ops nh --network anvil` runs all seven requirements and the injection
+scenario in one pass, writing a receipt for each into the same chain as every real run.
+Eight of eight hold.
+
+Two results worth reading twice:
+
+- **NH-1 is evidenced, not asserted.** "No network call was made" is a claim about what
+  did not happen, so the runner counts RPC requests around the gate and reports the
+  number. It is zero.
+- **NH-7 is a finding.** Three intents fired at once on the ops-direct path: one landed,
+  two were refused on nonce. Three transactions from one EOA with no nonce manager collide,
+  and the client refuses rather than silently replacing one. Serialised, all three land in
+  order. That is the problem KeeperHub solves, and evidencing *its* solution needs an
+  account (OQ-1) — so the receipt says `ops-direct` and the phase says so too.
+
+**No bypass flag was added** (CLAUDE.md §2.5). The gates are independent functions and the
+runner asks each directly; nothing in it is reachable from `propose`, `exec:mainnet` or
+`remit serve`.
+
+The injection scenario ran twice in a row unattended — G1 refuses with no network call, G2
+refuses with a named `Status` and no gas, the chain reverts, and the attacker's balance is
+still zero.
+
+`verifyReceiptChain` ran from a fresh `git clone` with `pnpm install` and nothing else:
+18 receipts checked against the Remit and limits documents, chain intact, and a one-field
+edit caught by the clone's own verifier. The *human* half of 4.5 — someone who did not
+write it running it — is still owed, and is thirty seconds of somebody else's time.
+
 **Exit gate**
 - Seven receipts in `receipts/`.
 - The injection scenario runs **twice in a row** without intervention.

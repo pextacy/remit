@@ -124,6 +124,25 @@ uv run --directory packages/remit-bridge remit verify --network anvil
 signer calls the Roles Modifier itself. The product path is `keeperhub`, and it is the
 bridge's (`remit run`), which stops rather than falling back when there is no API key.
 
+## The failure surface
+
+```bash
+pnpm --filter ops nh --network anvil                 # all seven, plus the injection story
+pnpm --filter ops nh --network anvil --case nh2
+pnpm --filter ops nh --network anvil --case injection
+```
+
+Every non-happy-path requirement in PRD.md §5.11, demonstrated and recorded into the same
+receipt chain as a real run. NH-1 counts the RPC requests it makes so that "no network
+call" is evidence rather than a claim; NH-7 reports what concurrency on this path actually
+does, which is collide, because that is the problem KeeperHub's nonce management exists to
+solve.
+
+There is no bypass flag anywhere (CLAUDE.md §2.5). The gates are independent functions and
+this runner asks each one directly — that is how the injection scenario shows the second
+gate catching what the first would have caught. Nothing in it is reachable from `propose`,
+`exec:mainnet` or `remit serve`.
+
 ## Rules that predate the code
 
 - **Base Sepolia is the default.** `--network base` additionally requires `--confirm`, and
