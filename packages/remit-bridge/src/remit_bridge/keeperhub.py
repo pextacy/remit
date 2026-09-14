@@ -96,6 +96,21 @@ class WorkflowExecutionStatus(BaseModel):
 
 
 @dataclass(frozen=True)
+class RunLog:
+    """Where the evidence for a run lives (KH-5).
+
+    Private routing, retry and gas escalation are the workflow's behaviour, not ours, so
+    the evidence that they happened is KeeperHub's run log rather than anything we could
+    write. The receipt records the `executionId` that log is addressed by; these are the
+    two ways to open it.
+    """
+
+    execution_id: str
+    status_url: str
+    cli_command: str
+
+
+@dataclass(frozen=True)
 class Resolution:
     """What we can say about an execution once it has stopped moving."""
 
@@ -132,13 +147,27 @@ class KeeperHubClient:
                 "KEEPERHUB_API_KEY does not look like a KeeperHub key (kh_…)"
             )
 
+        self._base_url = base_url.rstrip("/")
         self._client = httpx.Client(
-            base_url=base_url.rstrip("/"),
+            base_url=self._base_url,
             timeout=timeout,
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
+        )
+
+    def run_log(self, execution_id: str, *, kind: str = "workflow") -> RunLog:
+        """How to read what KeeperHub did with a run, without going through us."""
+        path = (
+            f"/api/workflows/executions/{execution_id}/status"
+            if kind == "workflow"
+            else f"/api/execute/{execution_id}/status"
+        )
+        return RunLog(
+            execution_id=execution_id,
+            status_url=f"{self._base_url}{path}",
+            cli_command=f"kh run logs {execution_id}",
         )
 
     def close(self) -> None:

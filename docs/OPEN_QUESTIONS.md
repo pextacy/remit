@@ -29,16 +29,21 @@ run against the live service is therefore a configuration step, not a build step
 
 **Unblocks when** someone creates the account and generates a key. Then:
 
-1. `claude mcp add --transport http keeperhub https://app.keeperhub.com/mcp`
-2. Build one trivial workflow by hand and execute it.
+1. `claude mcp add --transport http keeperhub https://app.keeperhub.com/mcp` — the MCP
+   server is how a workflow gets composed and reviewed before it is pinned, and it is one
+   of the surfaces the submission form asks about by name.
+2. `brew install keeperhub/tap/kh && kh auth login`, or set `KH_API_KEY`. `kh workflow
+   list`, `kh workflow run <id> --wait` and `kh run logs <run-id>` are the second path to
+   everything below, and `kh run logs` is where KH-5's evidence lives.
+3. Build one trivial workflow by hand and execute it.
 3. Confirm the execute response really does carry `transactionHash`, and how often it is
    absent — KH-4 in PRD.md assumes polling is always required, and the source says it is
    not always. Record both shapes.
-4. Confirm the `mcp:read` scope is what an API key gets by default, and that
+5. Confirm the `mcp:read` scope is what an API key gets by default, and that
    `/api/workflow/{id}/execute` accepts an API key rather than only an OAuth token with
    `mcp:write` — the route reads both, and which one a `kh_` key satisfies decides whether
    the workflow path or the direct-execution path is the one that ships.
-5. Check what a workflow with one write node actually returns in `transactionHashes`. If
+6. Check what a workflow with one write node actually returns in `transactionHashes`. If
    it can return more than one, the workflow definition needs splitting, because
    `resolve_tx_hash` refuses to guess which hash a receipt covers.
 

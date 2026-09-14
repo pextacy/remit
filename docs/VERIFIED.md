@@ -716,11 +716,78 @@ the answers look right, and they are the answers of code nobody is reading any m
 
 ---
 
+## 22. Coexisting with Almanak's own reliability machinery (AL-5)
+
+Almanak ships a stuck detector — `almanak/framework/services/stuck_detector.py` — that
+watches `snapshot.pending_transactions`, each carrying a `tx_hash`, a **nonce**, a **gas
+price** and a `submitted_at`. It raises `GAS_PRICE_BLOCKED` when a pending transaction's
+gas price falls below a ratio of current, and `NONCE_CONFLICT` on a duplicate nonce or a
+gap in the sequence.
+
+Every one of those signals is about a transaction the strategy's own wallet sent. A
+KeeperHub submission has none of those properties from the strategy's side: the wallet's
+nonce never advances, the gas price is KeeperHub's and is escalated by KeeperHub, and a
+resubmission changes the hash. Presenting one as a pending transaction would hand the
+detector three facts that are true of something else — and its remediation, replacing the
+transaction, would race the resubmission KeeperHub is already doing.
+
+Two properties keep them out of each other's way, and Almanak provides the vocabulary for
+the second:
+
+1. `Execute` does not return until the execution is **terminal**. From the strategy's
+   point of view there is never a KeeperHub-managed transaction in flight to detect as
+   stuck. The cost is a blocking call; the alternative is two systems recovering the same
+   transaction.
+2. Every submission is reported as
+   `SubmissionTransactionEvidence(role=EXECUTION_TRANSACTION_ROLE_ACTION,
+   replay_policy=REPLAY_POLICY_NEVER)` — Almanak's own enum for "do not replay this".
+
+What Almanak keeps is everything that is genuinely its business: balances, allowances,
+position state, and a failed execution, which arrives as `success=False` with an
+`error_code` and reaches its normal failure handling unchanged.
+
+## 23. KH-5 and KH-6 — declared where the Remit can bind them
+
+Private routing, retry and gas escalation are the workflow's behaviour. Remit has no
+resubmission path of its own, and that is the design: two systems deciding when to resend
+the same intent is how an execution layer double-spends.
+
+So `ops/workflows/exec-with-role.workflow.json` now declares them —
+`reliability.privateRouting`, `reliability.retry`, and a `notify` node with its channel —
+and that document is what `workflowHash` is taken over. The operator is not trusting our
+word that retries are on; they are bound into the hash inside the signed Remit.
+
+The evidence for a given run is KeeperHub's, not ours. Every receipt carries the
+`executionId` its run log is addressed by, and the adapter logs both ways to open it:
+
+```json
+{"event":"keeperhub.run_log","executionId":"…","status":"https://app.keeperhub.com/api/execute/…/status","cli":"kh run logs …"}
+```
+
+Unexercised until OQ-1, like everything else that talks to the live service.
+
+## 24. CI runs the gates, not just the types
+
+Until now CI type-checked, linted and grepped. Nothing in it ran a gate, so a regression in
+G1, G2, G4 or the receipt chain would have landed green and been noticed first by somebody
+running the demo.
+
+The `gates` job now forks Base Sepolia with Anvil and runs, in order: `verify:constants`,
+`p1`, `remit:issue`, `remit:verify-digest`, `remit:sign`, `g1`, `roles:diff`, `nh`,
+`remit verify`, and the Almanak seam — a strategy's intent through `remit serve`, plus all
+four rogue intents, each of which must be refused.
+
+Every step of that sequence was run locally on 2026-09-14 before it was written down, in
+the same order and with the same commands.
+
+---
+
 ## Re-verification log
 
 | Date | What | Result |
 |---|---|---|
 | 2026-09-13 | Full P0 pass: 24 chain assertions across 8453 and 84532 | all pass |
+| 2026-09-14 | Second completion pass: AL-5 via `REPLAY_POLICY_NEVER`, KH-5/KH-6 declared into `workflowHash`, BP-6 counter, and a CI job that runs the gates against a fork | sequence verified locally end to end |
 | 2026-09-14 | Completion pass: RM-5 signing and startup verification, G3-4 balance delta, G3-5 strategy-change review, the `issue` and `revoke` verbs, BP-4 tests | all observed; a stale-build trap found and closed |
 | 2026-09-14 | P10: submit:check over PLAN §11 — 12 checked, 3 blocking, 6 human; whole git history scanned clean; full path re-run cold | ready except the three known blockers |
 | 2026-09-14 | P9: five console screens rendering live fork data; G3 approved and declined end to end, with a `declined_g3` receipt | all 200, gate wired |

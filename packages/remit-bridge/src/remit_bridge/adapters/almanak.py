@@ -43,6 +43,7 @@ from remit_bridge.errors import (
     RemitError,
 )
 from remit_bridge.keeperhub import KeeperHubClient
+from remit_bridge.log import log_event
 
 #: Almanak intent types this adapter knows how to carry. Anything else is refused with a
 #: code the strategy author can act on, rather than translated into something adjacent.
@@ -406,12 +407,73 @@ class RemitExecutionService(gateway_pb2_grpc.ExecutionServiceServicer):
             ),
         )
 
+        # KH-5's evidence is KeeperHub's run log, and the executionId is how it is
+        # addressed. Logged rather than copied into the receipt: a receipt should carry
+        # the key to the evidence, not a snapshot of it that can drift.
+        if self._keeperhub is not None:
+            log = self._keeperhub.run_log(
+                resolution.execution_id,
+                kind="workflow" if self._workflow_id else "direct",
+            )
+            log_event(
+                "keeperhub.run_log",
+                executionId=log.execution_id,
+                status=log.status_url,
+                cli=log.cli_command,
+            )
+
         return gateway_pb2.ExecutionResult(
             success=resolution.succeeded,
             tx_hashes=[resolution.tx_hash],
             execution_id=resolution.execution_id,
             execution_plan_hash=self._bundle.remit_hash,
+            submission_transactions=[
+                gateway_pb2.SubmissionTransactionEvidence(
+                    tx_id=resolution.tx_hash,
+                    role=gateway_pb2.EXECUTION_TRANSACTION_ROLE_ACTION,
+                    # AL-5, stated in Almanak's own vocabulary: never replay this.
+                    #
+                    # KeeperHub owns nonce management, gas escalation and retries for this
+                    # submission. A replay from Almanak's side would be a *second*
+                    # submission of the same intent racing KeeperHub's own resubmission —
+                    # a double-spend risk dressed as a recovery. The two systems must not
+                    # both be deciding when to resend.
+                    replay_policy=gateway_pb2.REPLAY_POLICY_NEVER,
+                )
+            ],
         )
+
+    # ---- coexisting with Almanak's own reliability machinery ---------------
+    #
+    # AL-5. Almanak ships a stuck detector
+    # (`almanak/framework/services/stuck_detector.py`) that watches
+    # `snapshot.pending_transactions` — each carrying a `tx_hash`, a **nonce**, a **gas
+    # price** and a `submitted_at` — and flags `GAS_PRICE_BLOCKED` when a pending
+    # transaction's gas price falls below a ratio of current, or `NONCE_CONFLICT` on a
+    # duplicate or a gap in the nonce sequence.
+    #
+    # Every one of those signals is about a transaction the *strategy's own wallet* sent.
+    # A KeeperHub submission has none of those properties from the strategy's side: the
+    # wallet's nonce never advances, the gas price is KeeperHub's and is escalated by
+    # KeeperHub, and a resubmission changes the hash. Presenting one as a pending
+    # transaction would hand the detector three facts that are all true of something else,
+    # and its remediation — replace the transaction — would race the resubmission
+    # KeeperHub is already doing.
+    #
+    # Two properties keep them out of each other's way, and both are deliberate:
+    #
+    # 1. `Execute` does not return until the execution is **terminal**. `resolve_tx_hash`
+    #    polls to `completed`/`failed`, so from the strategy's point of view there is
+    #    never a KeeperHub-managed transaction in flight to detect as stuck. The cost is
+    #    a blocking call; the alternative is two systems recovering the same transaction.
+    #
+    # 2. Every submission is reported with `REPLAY_POLICY_NEVER`, which is Almanak's own
+    #    word for the same thing.
+    #
+    # What Almanak's alerting *keeps* is everything that is genuinely its business: the
+    # strategy's balances, its allowances, its position state, and a failed execution —
+    # `success=False` with an `error_code` — which reaches its normal failure handling
+    # unchanged.
 
     # ---- phase 3: status --------------------------------------------------
 

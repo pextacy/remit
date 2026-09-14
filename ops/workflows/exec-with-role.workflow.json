@@ -18,13 +18,30 @@
     },
     {
       "step": "notify",
-      "purpose": "Post the outcome and the transaction hash to the operator channel."
+      "purpose": "Post the outcome and the transaction hash to the operator channel.",
+      "channel": "discord-or-telegram",
+      "note": "KH-6. The operator hears about an execution from KeeperHub, not from us: a notification that depends on our process being alive is a notification that goes missing exactly when it matters."
     }
   ],
   "inputs": ["safe", "rolesModifier", "roleKey", "target", "value", "data", "operation"],
   "notes": [
     "This document is Remit's declaration of what must run. It is authored here and hashed into the Remit as workflowHash.",
     "It is NOT KeeperHub's serialisation of a registered workflow: that shape cannot be verified without an account, which is docs/OPEN_QUESTIONS.md OQ-1.",
-    "P3 registers this workflow, records the id KeeperHub assigns, and reconciles the two. If KeeperHub's canonical definition differs, the Remit is reissued against the registered hash — a Remit is cheap, a wrong binding is not."
-  ]
+    "P3 registers this workflow, records the id KeeperHub assigns, and reconciles the two. If KeeperHub's canonical definition differs, the Remit is reissued against the registered hash \u2014 a Remit is cheap, a wrong binding is not."
+  ],
+  "reliability": {
+    "privateRouting": true,
+    "retry": {
+      "attempts": 3,
+      "backoff": "exponential"
+    },
+    "notes": [
+      "KH-5. Private routing and retry are the workflow's, not ours. Remit has no",
+      "resubmission path of its own: two systems deciding when to resend the same",
+      "intent is how an execution layer double-spends.",
+      "Evidence for a run lives in KeeperHub's own run log \u2014 `kh run logs <run-id>`,",
+      "or GET /api/execute/{executionId}/status \u2014 and the receipt records the",
+      "executionId that log is addressed by."
+    ]
+  }
 }

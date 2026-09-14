@@ -46,6 +46,94 @@ jobs:
       # is checked on every push.
       - run: uv run remit --help
 
+  # The four gates are the product. Type-checking them proves they compile; this proves
+  # they refuse. Without it a regression in G1, G2, G4 or the receipt chain lands green,
+  # and the first thing anybody would notice is a demo behaving differently to the README.
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @remit/core build
+      - run: uv sync --all-groups --directory packages/remit-bridge
+
+      # Real contracts, real state, nobody's money. A fork is the only acceptable
+      # substitute for the chain (CLAUDE.md §2.1), and it is the one CI can afford.
+      - name: Fork Base Sepolia
+        run: |
+          anvil --fork-url https://sepolia.base.org --port 8546 --silent &
+          for i in $(seq 1 60); do
+            cast block-number --rpc-url http://127.0.0.1:8546 >/dev/null 2>&1 && break
+            sleep 1
+          done
+          cast chain-id --rpc-url http://127.0.0.1:8546
+
+      - name: The addresses still exist on chain
+        run: pnpm --filter @remit/core verify:constants
+
+      - name: P1 — value leaves a Safe through Roles, and refusals have names
+        run: pnpm --filter ops p1 --network anvil
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
+      - name: Issue and sign a Remit
+        run: |
+          pnpm --filter ops remit:issue --network anvil \
+            --strategy strategies/remit_usdc_lender/strategy.py \
+            --workflow ops/workflows/exec-with-role.workflow.json
+          pnpm --filter ops remit:verify-digest --network anvil
+          pnpm --filter ops remit:sign --network anvil
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
+      - name: G1 refuses what it claims to
+        run: pnpm --filter ops g1 --network anvil
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
+      - name: The chain says what the preset says
+        run: pnpm --filter ops roles:diff --network anvil
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
+      - name: Every non-happy path, with a receipt for each
+        run: |
+          pnpm --filter ops fund --network anvil --usdc 100
+          rm -rf receipts/anvil
+          pnpm --filter ops nh --network anvil
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
+      - name: The receipt chain verifies, from Python through the core
+        run: uv run --directory packages/remit-bridge remit verify --network anvil
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
+      - name: A strategy's intent crosses Almanak's seam into the gates
+        run: |
+          uv run --directory packages/remit-bridge remit serve \
+            --network anvil --port 50051 > /tmp/serve.log 2>&1 &
+          for i in $(seq 1 60); do
+            grep -q "listening" /tmp/serve.log && break
+            sleep 1
+          done
+          cat /tmp/serve.log
+          uv run --directory packages/remit-bridge python -m remit_bridge.drive \
+            --network anvil --port 50051 --dry-run
+          # The refusals matter as much as the happy path.
+          for case in protocol amount chained recipient; do
+            uv run --directory packages/remit-bridge python -m remit_bridge.drive \
+              --network anvil --port 50051 --dry-run --rogue "$case" && exit 1
+          done
+          echo "every rogue intent was refused"
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
   calldata:
     runs-on: ubuntu-latest
     steps:

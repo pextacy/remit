@@ -32,12 +32,39 @@ produces a hash-chained receipt linking the strategy version to the transaction 
 
 ### Which KeeperHub surfaces did you use?
 
-The workflow execution API for submission, with workflows registered in advance and
-invoked by id — no Remit code has a raw-send path, and CI fails the build if one appears.
-The execution status route for transaction-hash resolution, correlated strictly on
-`executionId`; an ambiguous correlation raises rather than writing a hash we are not sure
-of. Notification nodes for operator alerts. Plus a contribution back upstream: a
-policy-check node for their existing Safe plugin.
+**Agent-authored workflows.** The workflow is registered in advance and invoked by id with
+typed inputs. Nothing is composed at execution time, and `workflowHash` — the keccak of
+its canonical definition — is pinned inside the signed Remit, so the workflow that runs is
+the workflow the operator agreed to.
+
+**The workflow execution API**, and nothing else that sends. No Remit code has a raw-send
+path; CI fails the build if one appears.
+
+**The execution status route**, for transaction-hash resolution. Correlated strictly on
+`executionId`, and an ambiguous correlation — more than one hash for one execution —
+raises `ReceiptUnresolvable` rather than writing a hash we are not sure of. The receipt is
+then written with no hash, which is an honest gap rather than a plausible wrong entry.
+
+**The audit trail / run log.** Private routing, retry and gas escalation are the
+workflow's behaviour, not ours — Remit has no resubmission path of its own, because two
+systems deciding when to resend the same intent is how an execution layer double-spends.
+The evidence that they happened is therefore KeeperHub's, and every receipt carries the
+`executionId` the log is addressed by: `kh run logs <id>`, or
+`GET /api/execute/{id}/status`.
+
+**Notification nodes** for the operator channel, declared in the workflow — so the
+operator hears about an execution from KeeperHub rather than from us. A notification that
+depends on our process being alive goes missing exactly when it matters.
+
+**The MCP server and the `kh` CLI** are the two surfaces we have *not* used, and the
+reason is the same as everything else on this list: they need an account. The MCP server
+is how the workflow gets composed and reviewed in the first place
+(`claude mcp add --transport http keeperhub https://app.keeperhub.com/mcp`), and `kh run
+logs` is how its run log is read. Both are the first commands to run once there is a key —
+`docs/OPEN_QUESTIONS.md` OQ-1 lists them in order.
+
+Plus a contribution back upstream: a policy-check node for their existing Safe plugin,
+with tests, verified inside a clone of their repository.
 
 ### Testnet or mainnet?
 

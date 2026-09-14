@@ -388,6 +388,7 @@ is spent instead of decoding the answer afterwards.
 | BP-1 four nodes | **answered differently.** Three of the four exist upstream already; the fourth, `policy_check`, is what this contributes |
 | BP-2 matches their conventions | done — `"use step"`, `runPluginStep`, `maxRetries = 0`, the core-file pattern, their action-definition shape |
 | BP-3 self-contained, copies cleanly | **verified by doing it**: copied into a clone, `npx tsgo --noEmit` exits 0, `pnpm discover-plugins` registers it, their 61 Safe unit tests pass |
+| BP-6 Prometheus metrics | **done, and written so the PR can merge without it.** `runPluginStep` already records duration and success; it cannot see a refusal, because a refusal is a successful step. The counter that can is in `patches/metrics.md`, and the call site degrades to a no-op when the shared module does not have it |
 | BP-4 unit tests + fork test | **done.** Ten unit tests, run inside a clone of their repository: 10 passed. Their whole unit suite runs with the plugin and tests in it — 23,276 passing — and the two files that fail, fail identically on a pristine checkout |
 | BP-5 docs page + PR referencing the issue | docs page written; the issue and PR drafts are written and **unposted** — upstream requires an accepted issue first (OQ-4), and posting is the repository owner's action |
 

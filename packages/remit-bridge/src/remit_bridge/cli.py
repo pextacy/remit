@@ -48,15 +48,11 @@ from remit_bridge.errors import (
     RemitError,
 )
 from remit_bridge.keeperhub import KeeperHubClient
+from remit_bridge.log import log_event
 
-
-def _log(event: str, **fields: Any) -> None:
-    """Structured logging: one JSON object per line (CLAUDE.md §5).
-
-    Flushed, because `remit serve` is a long-running process: a server whose startup
-    lines only appear when it exits is a server nobody can tell is up.
-    """
-    print(json.dumps({"event": event, **fields}), flush=True)
+#: One implementation, in `log.py`, so a library module can use it too — a library that
+#: `print`s is a library that cannot be embedded.
+_log = log_event
 
 
 def _say(line: str) -> None:

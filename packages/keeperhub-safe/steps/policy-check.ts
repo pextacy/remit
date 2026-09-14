@@ -5,6 +5,7 @@ import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 import { ErrorCategory, logUserError } from "@/lib/logging";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { getErrorMessage } from "@/lib/utils";
+import * as safeMetrics from "@/lib/metrics/instrumentation/safe";
 import {
   runPluginStep,
   type StepInput,
@@ -62,6 +63,25 @@ function refused(outcome: Extract<PolicyCheckOutcome, { allowed: false }>): Poli
     refusedByRole: outcome.refusedByRole,
     gasEstimate: "0",
   };
+}
+
+/**
+ * Emit the policy-check counter when the metrics module has it.
+ *
+ * Written this way so the node can merge before, after, or without the counter in
+ * `patches/metrics.md`. A step that cannot be merged until two shared modules change with
+ * it is a step that waits behind a discussion it does not need to have.
+ */
+function recordPolicyCheckIfAvailable(options: {
+  chainId: number;
+  allowed: boolean;
+  revertKind?: string;
+  status?: string | undefined;
+}): void {
+  const instrumentation = safeMetrics as {
+    recordPolicyCheck?: (o: typeof options) => void;
+  };
+  instrumentation.recordPolicyCheck?.(options);
 }
 
 async function stepHandler(input: PolicyCheckInput): Promise<PolicyCheckResult> {
@@ -125,6 +145,24 @@ async function stepHandler(input: PolicyCheckInput): Promise<PolicyCheckResult> 
       to: ethers.getAddress(input.contractAddress),
       data: input.callData,
       value,
+    });
+
+    // BP-6. `runPluginStep` records duration and success; it cannot see a refusal,
+    // because a refusal is a successful step. See patches/metrics.md for the counter
+    // this calls into — the node works without it, and the dashboard question "how
+    // often does the role refuse, and on what?" does not.
+    recordPolicyCheckIfAvailable({
+      chainId,
+      allowed: outcome.allowed,
+      ...(outcome.allowed
+        ? {}
+        : {
+            revertKind: outcome.revert.kind,
+            status:
+              outcome.revert.kind === "role-condition-violation"
+                ? outcome.revert.status
+                : undefined,
+          }),
     });
 
     if (!outcome.allowed) {
