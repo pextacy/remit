@@ -96,6 +96,38 @@ export function describeRefusal(
   }
 }
 
+/**
+ * Did the chain answer, or did we fail to reach it?
+ *
+ * A revert carries data, and ethers surfaces it as `CALL_EXCEPTION` with `data` set — or,
+ * for some providers, nested one level down in `error.info.error.data`. A transport
+ * failure carries none of that, whatever its message says.
+ *
+ * Asked as a shape rather than by matching on text: a check whose verdict depends on how
+ * a provider chose to word a timeout is a check that changes meaning when the provider
+ * does.
+ */
+export function isChainAnswer(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+
+  const candidate = error as {
+    code?: unknown;
+    data?: unknown;
+    info?: { error?: { data?: unknown } };
+  };
+
+  if (typeof candidate.data === "string" && candidate.data.startsWith("0x")) return true;
+  if (
+    typeof candidate.info?.error?.data === "string" &&
+    candidate.info.error.data.startsWith("0x")
+  ) {
+    return true;
+  }
+  // A revert with no return data — `require(false)` with no message, or a call to an
+  // address with no code. The chain answered; it just said nothing.
+  return candidate.code === "CALL_EXCEPTION";
+}
+
 export type ResolvedRoleSigner = Extract<SignerMode, { kind: "safe-role" }>;
 
 /**
@@ -156,6 +188,20 @@ export async function simulateAsRole(
       provider.call(request)
     );
   } catch (error) {
+    // Only a revert is an answer.
+    //
+    // Failover exhausts, nodes time out, gateways return 502. None of those is the
+    // modifier saying no, and this `catch` used to treat them as if they were: the
+    // classifier fell through to its default and the node returned
+    // `allowed: false, reason: "The call would revert: <network error>"`. A workflow
+    // author branching on `allowed` then stopped for a policy refusal that never
+    // happened, and the metrics counted one.
+    //
+    // Rethrown instead, so the step's own handler reports it as a failed check —
+    // `success: false`, `ExecutionErrorType.EXTERNAL` — which is the case it already
+    // has a branch and a log line for.
+    if (!isChainAnswer(error)) throw error;
+
     const revert = classifyRevert(error);
     return {
       allowed: false,

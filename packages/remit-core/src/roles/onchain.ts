@@ -144,7 +144,20 @@ export async function readRole(
           if ((args.roleKey as Hex).toLowerCase() !== roleKey.toLowerCase()) break;
           const target = upsert(getAddress(args.targetAddress as Address));
           target.clearance = Clearance.None;
-          target.functions.clear();
+          // The function scopes are **not** cleared, because the contract does not clear
+          // them. `revokeTarget` writes `TargetAddress(Clearance.None, ...)` and nothing
+          // else; the per-(target, selector) scope configs stay exactly where they were.
+          //
+          // Verified against Roles 2.1.0 on a fork: scope `approve` on USDC, revoke the
+          // target, then `scopeTarget` it again — and `approve` is permitted once more,
+          // with no `ScopeFunction` in between. Clearing them here made the replay report
+          // zero functions for a target the chain would let the agent call, so
+          // `roles:diff` answered "no difference" and the RM-4 drift check answered "ok"
+          // about a role carrying authority the preset does not list. A diff that cannot
+          // see a permission is worse than no diff, because it is read instead of one.
+          //
+          // The clearance is what makes the target uncallable *now*, and `diffRole`
+          // reports clearance on its own — so a revoked target still shows as revoked.
           break;
         }
         case "ScopeFunction": {

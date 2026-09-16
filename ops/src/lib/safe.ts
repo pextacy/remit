@@ -206,7 +206,7 @@ export async function execSafeTx(
 
   const signatures = `0x${parts.join("")}` as Hex;
 
-  return send(
+  const hash = await send(
     network,
     ordered[0] ?? fail("no owners supplied"),
     {
@@ -229,6 +229,53 @@ export async function execSafeTx(
       }),
     },
     label,
+  );
+
+  // Do not return until the Safe's own nonce has moved.
+  //
+  // The *next* Safe transaction reads `nonce()` to build its digest, and a public RPC is
+  // a pool of nodes: that read can be answered by one that has not yet seen this
+  // transaction, even though its receipt is already in hand. The digest is then built for
+  // a nonce that is already spent, the signature recovers to an address that is not an
+  // owner, and the Safe answers **GS026 — invalid owner** for a signature that was
+  // perfectly good.
+  //
+  // `roles:apply` sends five of these back to back, so this is not a corner; it cost a
+  // reverted `scopeTarget` and its gas on Base Sepolia. It is invisible on a fork, where
+  // there is one node and no lag to have.
+  await waitForNonceAfter(network, safe, nonce, label);
+
+  return hash;
+}
+
+/**
+ * Wait until the Safe reports a nonce past the one just consumed.
+ *
+ * Bounded, and a refusal rather than an assumption: carrying on against a node that
+ * cannot see the transaction we hold a receipt for means the next digest is built on a
+ * reading nobody should trust.
+ */
+async function waitForNonceAfter(
+  network: Network,
+  safe: Address,
+  used: bigint,
+  label: string,
+  attempts = 40,
+): Promise<void> {
+  const client = publicClientFor(network);
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const current = (await client.readContract({
+      address: safe,
+      abi: safeAbi,
+      functionName: "nonce",
+    })) as bigint;
+    if (current > used) return;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  fail(
+    `${label} landed but ${safe} still reports nonce ${used} after ` +
+      `${(attempts * 500) / 1000}s. The RPC is behind the chain; a transaction built on ` +
+      "that reading would be signed for a nonce that is already spent.",
   );
 }
 

@@ -66,6 +66,20 @@ function serialise(value: unknown, path: string): string {
     return `[${value.map((item, index) => serialise(item, `${path}[${index}]`)).join(",")}]`;
   }
 
+  // Only a plain object may be serialised. A `Date`, a `Map`, a `Set` or any class
+  // instance has no enumerable own properties worth hashing, so `Object.entries` hands
+  // back `[]` and every one of them canonicalises to `{}` — the same bytes, and the same
+  // hash, as an empty object and as each other. Silently hashing four different
+  // documents to one value is worse than any of them being rejected, and this is the
+  // only place that could do it.
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new NonCanonicalValueError(
+      path,
+      `${(value as object).constructor?.name ?? "a class instance"} — use a plain object`,
+    );
+  }
+
   const entries = Object.entries(value as Record<string, unknown>)
     // `undefined` is absence, not a value: an optional field that was never set must
     // produce the same bytes as one that is missing entirely.

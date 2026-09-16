@@ -38,6 +38,32 @@ export function option(args: Args, key: string): string | undefined {
   return args.options.get(key);
 }
 
+/**
+ * An option that has to be a number, refused where it was typed.
+ *
+ * `Number("9O")` is `NaN`, and a `NaN` timeout is not a long wait — it is no wait at
+ * all: every `Date.now() < deadline` comparison against it is false, so `--review-timeout`
+ * with a typo in it turned G3 into a gate that refused instantly, before anybody could
+ * have looked. A human gate that can be removed by mistyping a flag is not a gate, and
+ * the mistype is silent precisely where it matters.
+ */
+export function numberOption(
+  args: Args,
+  key: string,
+  bounds: { min: number; max: number },
+): number | undefined {
+  const raw = args.options.get(key);
+  if (raw === undefined) return undefined;
+
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < bounds.min || value > bounds.max) {
+    fail(
+      `--${key} must be a number between ${bounds.min} and ${bounds.max}, not "${raw}"`,
+    );
+  }
+  return value;
+}
+
 export function requireOption(args: Args, key: string): string {
   const value = args.options.get(key);
   if (value === undefined) fail(`--${key} is required`);

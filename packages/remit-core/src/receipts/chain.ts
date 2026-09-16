@@ -20,6 +20,7 @@ import {
   GENESIS_PREV_HASH,
   type Receipt,
   type ReceiptBody,
+  receiptBodySchema,
   receiptSchema,
 } from "./schema.js";
 
@@ -28,9 +29,19 @@ export function receiptHash(body: ReceiptBody): Hex {
   return keccak256(toBytes(canonicalJson(body)));
 }
 
-/** Seal a body into a receipt. The hash is computed here and nowhere else. */
+/**
+ * Seal a body into a receipt. The hash is computed here and nowhere else.
+ *
+ * The body is parsed *before* it is hashed, and the parsed form is what gets written.
+ * The schemas normalise — an address is checksummed, a bytes32 is lowercased — and
+ * verification re-derives the hash from the parsed file. Hashing the caller's spelling
+ * instead would seal a receipt whose own `selfHash` failed to reproduce the moment a
+ * caller handed in an uppercase hash, which is a chain that breaks for no reason anyone
+ * could find.
+ */
 export function sealReceipt(body: ReceiptBody): Receipt {
-  return receiptSchema.parse({ ...body, selfHash: receiptHash(body) });
+  const normalised = receiptBodySchema.parse(body);
+  return receiptSchema.parse({ ...normalised, selfHash: receiptHash(normalised) });
 }
 
 export type ChainProblem = {
@@ -47,9 +58,39 @@ export type ChainVerification = {
   /** The last `selfHash` — the value that anchors the whole chain. */
   readonly head: Hex;
   readonly problems: readonly ChainProblem[];
+  /**
+   * Receipts written under a Remit other than the one supplied.
+   *
+   * Not a problem, and saying so matters. A Remit expires, and the instruction when it
+   * does is to *reissue* it rather than widen it — so a chain that has been running for
+   * longer than one Remit's life legitimately contains receipts naming two or three of
+   * them. Calling those a broken chain made "the receipts verify" false for every
+   * deployment that had ever done the right thing, which is a verifier that trains its
+   * reader to ignore it.
+   *
+   * The integrity of those records is checked exactly as hard as any other: their own
+   * `selfHash`, their sequence and their `prevHash` link. What cannot be checked is the
+   * one thing the supplied documents do not describe — which is what this field reports.
+   */
+  readonly uncheckedAgainstDocuments: readonly {
+    readonly sequence: number;
+    readonly file: string;
+    readonly remitHash: Hex;
+  }[];
 };
 
-export type StoredReceipt = { readonly file: string; readonly receipt: unknown };
+export type StoredReceipt = {
+  readonly file: string;
+  readonly receipt: unknown;
+  /**
+   * Why the file could not be read at all, when it could not.
+   *
+   * A truncated or hand-edited file is a problem to report, not an exception to throw:
+   * a verifier that dies on the first bad record tells you less than one that finishes
+   * and lists every record it could not account for.
+   */
+  readonly unreadable?: string;
+};
 
 /**
  * The documents a receipt's hashes are supposed to commit to.
@@ -67,8 +108,17 @@ export function verifyReceiptChain(
   documents?: RemitDocuments,
 ): ChainVerification {
   const problems: ChainProblem[] = [];
+  const uncheckedAgainstDocuments: {
+    sequence: number;
+    file: string;
+    remitHash: Hex;
+  }[] = [];
   let previous: Hex = GENESIS_PREV_HASH;
   let head: Hex = GENESIS_PREV_HASH;
+  /** Did any record in this chain actually happen under the Remit we were handed? */
+  let matchedTheDocuments = false;
+  /** When the newest readable record was written. Zero for a chain with none. */
+  let newestAt = 0;
 
   // If the Remit documents are to hand, re-derive their hashes once, from the bytes.
   let expectedRemitHash: Hex | undefined;
@@ -95,14 +145,29 @@ export function verifyReceiptChain(
   }
 
   stored.forEach((entry, index) => {
+    if (entry.unreadable !== undefined) {
+      problems.push({
+        sequence: index,
+        file: entry.file,
+        problem: "the file could not be read",
+        expected: "a v1 receipt",
+        actual: entry.unreadable,
+      });
+      return;
+    }
+
     const parsed = receiptSchema.safeParse(entry.receipt);
     if (!parsed.success) {
+      const issue = parsed.error.issues[0];
       problems.push({
         sequence: index,
         file: entry.file,
         problem: "receipt does not match the schema",
         expected: "a v1 receipt",
-        actual: parsed.error.issues[0]?.message ?? "unparseable",
+        actual:
+          issue === undefined
+            ? "unparseable"
+            : `${issue.path.length === 0 ? "receipt" : issue.path.join(".")}: ${issue.message}`,
       });
       return;
     }
@@ -140,21 +205,37 @@ export function verifyReceiptChain(
       });
     }
 
+    // A receipt either names the Remit we were handed, or it names another one.
+    //
+    // If it names ours, its `limitsHash` has to be the one that Remit binds — a record
+    // claiming this authority under different limits is the forgery this check exists to
+    // catch, and it is a hard failure.
+    //
+    // If it names another, there is nothing here to check it against. That is the normal
+    // state of any chain older than one Remit: expiry is answered by reissuing, so a
+    // long-lived deployment's chain spans several. Reporting those as broken made the
+    // verifier's answer "no" for every deployment that had done the right thing.
     if (expectedRemitHash !== undefined && body.remitHash !== expectedRemitHash) {
-      problems.push({
+      uncheckedAgainstDocuments.push({
         sequence: body.sequence,
         file: entry.file,
-        problem: "receipt references a Remit that the stored document does not produce",
-        expected: expectedRemitHash,
-        actual: body.remitHash,
+        remitHash: body.remitHash,
       });
+    } else if (expectedRemitHash !== undefined) {
+      matchedTheDocuments = true;
     }
 
-    if (expectedLimitsHash !== undefined && body.limitsHash !== expectedLimitsHash) {
+    if (
+      expectedRemitHash !== undefined &&
+      body.remitHash === expectedRemitHash &&
+      expectedLimitsHash !== undefined &&
+      body.limitsHash !== expectedLimitsHash
+    ) {
       problems.push({
         sequence: body.sequence,
         file: entry.file,
-        problem: "receipt references limits that the stored document does not produce",
+        problem:
+          "receipt claims this Remit but references limits the Remit does not bind",
         expected: expectedLimitsHash,
         actual: body.limitsHash,
       });
@@ -193,9 +274,48 @@ export function verifyReceiptChain(
       });
     }
 
+    if (body.at > newestAt) newestAt = body.at;
     previous = selfHash;
     head = selfHash;
   });
 
-  return { ok: problems.length === 0, count: stored.length, head, problems };
+  // Documents that describe an authority this chain never used are almost certainly the
+  // wrong documents — a path typo, or last quarter's Remit. `unchecked` has to mean
+  // history rather than "we verified nothing against these and said yes".
+  //
+  // With one exception, and it is a normal state rather than a corner: a Remit issued and
+  // not yet acted under. Its `notBefore` is later than anything in the chain, so it could
+  // not have produced a record here, and calling that a broken chain would make `verify`
+  // answer "no" in the minutes between reissuing a Remit and using it — the same false
+  // alarm as reporting a reissue itself.
+  //
+  // A Remit that *was* in force while this chain was being written and is named by
+  // nothing in it is the wrong document, and that is what this catches.
+  if (expectedRemitHash !== undefined && stored.length > 0 && !matchedTheDocuments) {
+    const remit = remitSchema.safeParse(documents?.remit);
+    const issuedAfterTheChain = remit.success && remit.data.notBefore >= newestAt;
+
+    if (!issuedAfterTheChain) {
+      problems.push({
+        sequence: -1,
+        file: "remit",
+        problem:
+          "no receipt in this chain was written under the Remit supplied, and it was " +
+          "in force while the chain was",
+        expected: expectedRemitHash,
+        actual:
+          uncheckedAgainstDocuments.length === 0
+            ? "a chain with no readable records"
+            : `${uncheckedAgainstDocuments.length} receipt(s), all under other Remits`,
+      });
+    }
+  }
+
+  return {
+    ok: problems.length === 0,
+    count: stored.length,
+    head,
+    problems,
+    uncheckedAgainstDocuments,
+  };
 }

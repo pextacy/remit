@@ -33,7 +33,12 @@ import { networkFrom, option, parseArgs } from "../lib/args.js";
 import { publicClientFor } from "../lib/clients.js";
 import { countingClientFor } from "../lib/counting-transport.js";
 import { requireDeployment, requireField } from "../lib/deployment.js";
-import { executeThroughRole, preflight, type RoleAction } from "../lib/exec-role.js";
+import {
+  executeThroughRole,
+  preflight,
+  preflightWasUnanswered,
+  type RoleAction,
+} from "../lib/exec-role.js";
 import { fail, logEvent, say } from "../lib/log.js";
 import { resolveNetwork } from "../lib/networks.js";
 import { NO_SUBMISSION, type ReceiptContext, writeReceipt } from "../lib/receipt.js";
@@ -137,9 +142,13 @@ async function nh1(): Promise<void> {
     submission: NO_SUBMISSION,
   });
 
+  // Both halves of the requirement: refused *for being out of the envelope*, and for
+  // free. Asserting only `requests === 0` would have reported NH-1 held while G1 refused
+  // for some entirely different reason — a schema change that turned this into
+  // `INTENT_MALFORMED` costs nothing in RPC calls either.
   record(
     "NH-1",
-    requests === 0,
+    result.error.code === "OUT_OF_REMIT_RECIPIENT" && requests === 0,
     `${result.error.code}; ${requests} RPC request(s) made reaching that answer`,
   );
 }
@@ -250,9 +259,39 @@ async function nh3(): Promise<void> {
     to: getAddress(attacker),
   };
 
-  // G1 and G2 both refuse this. The chain is asked anyway — with an explicit gas limit,
-  // because estimation would throw before anything was sent and a refusal that never
-  // reached the chain is not evidence that the chain refuses.
+  // Both earlier gates are *asked*, not assumed. This receipt used to state their
+  // outcomes as constants — `OUT_OF_REMIT_RECIPIENT` and `ParameterNotAllowed` — without
+  // either gate having run in this scenario, which is the audit trail asserting a gate
+  // that never answered. It is the one thing the bridge's own comments forbid, and these
+  // records are committed.
+  const envelope = gate1(intent);
+  if (envelope.ok)
+    fail("NH-3: G1 allowed a withdrawal to an address that is not the Safe");
+
+  const preflighted = await preflight(
+    network,
+    rolesModifier,
+    loaded.remit.roleKey,
+    cast.agent.address,
+    actionFor(intent),
+  );
+  if (preflighted.ok) fail("NH-3: G2 allowed a call the preset does not permit");
+  // A chain that never answered is not the preset refusing, and this receipt is
+  // committed as evidence that it did. NH-6 is the case about an unreachable chain;
+  // here it means the scenario could not be run.
+  if (preflightWasUnanswered(preflighted)) {
+    fail(`NH-3: the chain did not answer G2 — ${preflighted.reason}`);
+  }
+  const refusedAt2 =
+    preflighted.decoded.kind === "roles_condition_violation"
+      ? preflighted.decoded.statusName
+      : preflighted.decoded.kind === "roles_error"
+        ? preflighted.decoded.name
+        : preflighted.decoded.kind;
+
+  // The chain is asked anyway — with an explicit gas limit, because estimation would
+  // throw before anything was sent and a refusal that never reached the chain is not
+  // evidence that the chain refuses.
   const result = await executeThroughRole(
     network,
     rolesModifier,
@@ -270,8 +309,13 @@ async function nh3(): Promise<void> {
     intent,
     action: receiptAction(intent, "1"),
     gates: [
-      { gate: "G1", outcome: "refused", code: "OUT_OF_REMIT_RECIPIENT" },
-      { gate: "G2", outcome: "refused", code: "ParameterNotAllowed" },
+      {
+        gate: "G1",
+        outcome: "refused",
+        code: envelope.error.code,
+        detail: formatEnvelopeError(envelope.error),
+      },
+      { gate: "G2", outcome: "refused", code: refusedAt2, detail: preflighted.reason },
       { gate: "G4", outcome: "reverted", detail: result.hash },
     ],
     outcome: "reverted_g4",
@@ -285,7 +329,23 @@ async function nh3(): Promise<void> {
     },
   });
 
-  record("NH-3", true, `reverted on chain, ${result.gasUsed} gas, ${result.hash}`);
+  /**
+   * What was actually demonstrated, not the fact that we reached this line.
+   *
+   * This was `record("NH-3", true, …)`. The `fail()` guards above do enforce each step,
+   * so the demonstration was real — but the *recorded* outcome was a constant, and
+   * `outcomes` is what the summary line and the exit code are computed from. A check
+   * that cannot fail is worse than no check: it reports "ok" beside every real one, and
+   * a reader counts it. The same sin was found and fixed in `mainnet:preflight`.
+   */
+  record(
+    "NH-3",
+    envelope.error.code === "OUT_OF_REMIT_RECIPIENT" &&
+      refusedAt2 === "ParameterNotAllowed" &&
+      result.status === "reverted",
+    `${envelope.error.code} at G1, ${refusedAt2} at G2, reverted at G4 — ` +
+      `${result.gasUsed} gas, ${result.hash}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +375,14 @@ async function nh4(): Promise<void> {
   );
 
   try {
+    // Asked, not asserted. The claim this receipt makes about G1 — that the Remit still
+    // permits the action, and it is the *chain* that stopped it — is the whole point of
+    // the case, so it has to be a reading rather than a sentence.
+    const envelope = gate1(intent);
+    if (!envelope.ok) {
+      fail(`NH-4: G1 refused before the chain could — ${envelope.error.code}`);
+    }
+
     const check = await preflight(
       network,
       rolesModifier,
@@ -323,6 +391,19 @@ async function nh4(): Promise<void> {
       actionFor(intent),
     );
     if (check.ok) fail("NH-4: the agent can still act after the kill switch");
+    // A chain that never answered says nothing about whether the switch took effect,
+    // and this receipt is committed as evidence that it did.
+    if (preflightWasUnanswered(check)) {
+      fail(`NH-4: the chain did not answer G2 — ${check.reason}`);
+    }
+
+    // The refusal has to be the role's, not the call failing for its own reasons. A
+    // revoked agent answers `NoMembership` or `NotAuthorized`; anything else means the
+    // role let it through and something further in said no, which is a true answer to a
+    // different question and would make this case demonstrate nothing.
+    const refusedByRole =
+      check.decoded.kind === "roles_error" &&
+      (check.decoded.name === "NoMembership" || check.decoded.name === "NotAuthorized");
 
     const forced = await executeThroughRole(
       network,
@@ -338,8 +419,26 @@ async function nh4(): Promise<void> {
       intent,
       action: receiptAction(intent, "1"),
       gates: [
-        { gate: "G1", outcome: "pass", detail: "the Remit is unchanged" },
-        { gate: "G2", outcome: "refused", code: "NoMembership", detail: check.reason },
+        {
+          gate: "G1",
+          outcome: "pass",
+          detail: "the Remit is unchanged — it is the chain that revoked the agent",
+        },
+        {
+          gate: "G2",
+          outcome: "refused",
+          // The name the modifier actually gave. A revoked agent answers `NotAuthorized`
+          // as often as `NoMembership` — one comes from the `moduleOnly` guard, the other
+          // a layer in — and a receipt that always says one of them names a refusal that
+          // may not have happened.
+          code:
+            check.decoded.kind === "roles_error"
+              ? check.decoded.name
+              : check.decoded.kind === "roles_condition_violation"
+                ? check.decoded.statusName
+                : check.decoded.kind,
+          detail: check.reason,
+        },
         { gate: "G4", outcome: "reverted", detail: forced.hash },
       ],
       outcome: "reverted_g4",
@@ -353,7 +452,13 @@ async function nh4(): Promise<void> {
       },
     });
 
-    record("NH-4", true, `${check.reason} at G2, then reverted on chain at G4`);
+    // Not a constant. `outcomes` is what the summary line and the exit code are computed
+    // from, and a check that cannot fail reports "ok" beside every real one.
+    record(
+      "NH-4",
+      envelope.ok && refusedByRole && forced.status === "reverted",
+      `${check.reason} at G2, then reverted on chain at G4`,
+    );
   } finally {
     await assignRole(
       network,
@@ -418,6 +523,12 @@ async function nh6(): Promise<void> {
 
   // A port with nothing listening: a real connection refusal, not a simulated one.
   const dead = { ...resolveNetwork(network.name), rpcUrl: "http://127.0.0.1:1" };
+
+  // G1 runs here for real: this case is about G2 being unable to answer, and the receipt
+  // says G1 passed — which it may only say if G1 was asked.
+  const envelope = gate1(intent);
+  if (!envelope.ok) fail(`NH-6: G1 refused a legitimate intent: ${envelope.error.code}`);
+
   const started = Date.now();
   const check = await preflight(
     dead,
@@ -430,25 +541,50 @@ async function nh6(): Promise<void> {
 
   if (check.ok) fail("NH-6: an unreachable RPC reported that the call would be allowed");
 
+  // The gate could not answer, which is not the same as the role refusing — and the
+  // receipt has to say which. `preflight` used to collapse the two: a `fetch failed`
+  // carries no revert data, so it decoded as `undecodable` and came back looking like a
+  // refusal. Now that the distinction exists in the type, this record uses it, and it
+  // uses the same words the gated pipeline writes for the same fact — a failure surface
+  // whose records are shaped differently from the product's is one nobody can audit.
+  const unanswered = preflightWasUnanswered(check);
+
   writeReceipt(context, {
     intent,
     action: receiptAction(intent, "1"),
     gates: [
-      { gate: "G1", outcome: "pass" },
       {
-        gate: "G2",
-        // The gate could not answer, which is not the same as the role refusing — the
-        // code says which. What matters for NH-6 is the outcome: nothing was executed.
-        outcome: "refused",
-        code: "G2_UNREACHABLE",
-        detail: `the chain could not be reached: ${check.reason}`,
+        gate: "G1",
+        outcome: "pass",
+        detail: "inside the Remit; the chain was the problem",
       },
+      unanswered
+        ? {
+            gate: "G2",
+            outcome: "skipped",
+            code: "RPC_UNREACHABLE",
+            detail: check.reason,
+          }
+        : {
+            gate: "G2",
+            outcome: "refused",
+            code: "G2_REFUSED",
+            detail: check.reason,
+          },
     ],
     outcome: "rejected_g2",
     submission: NO_SUBMISSION,
   });
 
-  record("NH-6", !check.ok, `refused after ${elapsed}ms of retries; nothing was sent`);
+  // The requirement is that an unreachable chain stops the action *and* is not recorded
+  // as the preset having spoken. Asserting only `!check.ok` would have passed while the
+  // receipt claimed a refusal nobody made.
+  record(
+    "NH-6",
+    !check.ok && unanswered,
+    `the chain could not be reached after ${elapsed}ms; nothing was sent, and the ` +
+      "receipt says the gate was not asked rather than that it refused",
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -538,8 +674,16 @@ async function nh7(): Promise<void> {
         intent,
         action: receiptAction(intent, amounts[index] ?? "0"),
         gates: [
-          { gate: "G1", outcome: "pass" },
-          { gate: "G2", outcome: "skipped", detail: "concurrency case" },
+          {
+            gate: "G1",
+            outcome: "pass",
+            detail: `inside the Remit: approve ${amounts[index]} USDC to the pool`,
+          },
+          {
+            gate: "G2",
+            outcome: "skipped",
+            detail: "not asked — this case is about nonce ordering, not authority",
+          },
           { gate: "G4", outcome: "pass", detail: `nonce ${nonces[index]}` },
         ],
         outcome: "executed",
@@ -619,6 +763,11 @@ async function injection(): Promise<void> {
     action,
   );
   if (check.ok) fail("injection: G2 allowed it");
+  // A chain that never answered is not the preset refusing, and this receipt is committed
+  // as the demonstration that it did.
+  if (preflightWasUnanswered(check)) {
+    fail(`injection: the chain did not answer G2 — ${check.reason}`);
+  }
 
   const named =
     check.decoded.kind === "roles_condition_violation"
@@ -677,10 +826,24 @@ async function injection(): Promise<void> {
     args: [getAddress(attacker)],
   })) as bigint;
 
+  /**
+   * The claim and the assertion have to be the same sentence.
+   *
+   * The evidence line says "three independent refusals", and this checked only the
+   * attacker's balance — which is also zero when nothing happened at all. The three
+   * refusals are what the README leads with; each one is now named here, and the balance
+   * is the fourth thing rather than the only one.
+   */
+  const threeRefusals =
+    envelope.error.code === "OUT_OF_REMIT_RECIPIENT" &&
+    named === "ParameterNotAllowed" &&
+    forced.status === "reverted";
+
   record(
     "INJ",
-    stolen === 0n,
-    `three independent refusals; the attacker holds ${formatUnits(stolen, USDC_DECIMALS)} USDC`,
+    threeRefusals && stolen === 0n,
+    `three independent refusals (${envelope.error.code}, ${named}, reverted); ` +
+      `the attacker holds ${formatUnits(stolen, USDC_DECIMALS)} USDC`,
   );
 }
 

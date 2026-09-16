@@ -173,7 +173,21 @@ The console renders, side by side:
 - the G2 result
 
 The operator approves or declines. A decline is recorded in the receipt chain as a
-terminal receipt with `outcome: "declined"`. Declines are part of the audit trail.
+terminal receipt with `outcome: "declined_g3"`. Declines are part of the audit trail.
+
+Three things resolve to a refusal, and they are the reason this is a gate rather than a
+prompt:
+
+- **A decline.** The operator said no.
+- **Silence.** A review that times out into an approval is not a review.
+- **No reviewer.** With no queue configured the action stops *before* G2, for free, and
+  the receipt records `G3_NO_REVIEWER`. The escape hatch — `--no-review` on the ops path
+  — has to be typed, and puts "nobody looked" in the chain rather than leaving G3 out of
+  it.
+
+Both paths use the queue: the ops pipeline and the gateway a strategy talks to. It is a
+directory of JSON files under `ops/review/`, so the console can be restarted, replaced by
+a text editor, or absent, without the gate changing shape.
 
 ### G4 — On-chain enforcement (gas, unforgeable)
 

@@ -56,9 +56,25 @@ export function usdToMicros(amount: string): bigint {
   return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, "0").slice(0, 6));
 }
 
-/** `5250000` → `"5.25"`. Used only for display and log lines. */
+/**
+ * `5250000` → `"5.25"`. Used only for display and log lines.
+ *
+ * The sign is taken off first and put back at the end. BigInt division truncates toward
+ * zero and `%` keeps the sign of the dividend, so `-5n` used to produce a whole part of
+ * `0`, a remainder of `-5`, and the string `"0.0000-5"` — which reached the headroom line
+ * of the mainnet preamble the moment a cap was lowered below what had already been spent.
+ * A number that renders as nonsense on the one screen an operator reads before spending
+ * real money is worse than no number: they either distrust every figure beside it or
+ * they do not notice.
+ */
 export function microsToUsd(micros: bigint): string {
-  const whole = micros / 1_000_000n;
-  const fraction = (micros % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
-  return fraction === "" ? whole.toString() : `${whole}.${fraction}`;
+  const negative = micros < 0n;
+  const magnitude = negative ? -micros : micros;
+  const whole = magnitude / 1_000_000n;
+  const fraction = (magnitude % 1_000_000n)
+    .toString()
+    .padStart(6, "0")
+    .replace(/0+$/, "");
+  const rendered = fraction === "" ? whole.toString() : `${whole}.${fraction}`;
+  return negative ? `-${rendered}` : rendered;
 }

@@ -15,11 +15,18 @@
  * is a mainnet path nobody has rehearsed.
  */
 
-import { microsToUsd, USDC, USDC_DECIMALS, usdToMicros } from "@remit/core";
+import {
+  checkPresetDrift,
+  microsToUsd,
+  USDC,
+  USDC_DECIMALS,
+  usdToMicros,
+} from "@remit/core";
 import { formatUnits, getAddress, parseUnits } from "viem";
 import { AAVE_POOL_FOR } from "../lib/actions.js";
 import { castFor } from "../lib/actors.js";
-import { networkFrom, option, parseArgs } from "../lib/args.js";
+import { networkFrom, numberOption, option, parseArgs } from "../lib/args.js";
+import { publicClientFor } from "../lib/clients.js";
 import { requireDeployment, requireField } from "../lib/deployment.js";
 import { readLedger } from "../lib/ledger-store.js";
 import { fail, logEvent, say } from "../lib/log.js";
@@ -46,8 +53,75 @@ const loaded = loadRemit(network.name);
 requireRemitHash(loaded, option(args, "remit"));
 
 const cast = await castFor(network);
+
+/**
+ * RM-4, on the path that spends real money.
+ *
+ * `mainnet:preflight` prints this and an operator is told to run it first — which means
+ * the check that the chain still says what the Remit says was advisory on the one command
+ * where it is not. A preset that has drifted makes every line of the preamble below a
+ * promise nobody is keeping: the Remit would state a recipient allowlist the chain had
+ * stopped enforcing, and G1 would agree with it all the way to G4.
+ *
+ * So it runs here, before the operator is shown anything, and a difference stops the
+ * command. `--ignore-drift` exists because an operator mid-migration may know exactly
+ * which difference they are looking at — and it makes them say so.
+ */
+const drift = await checkPresetDrift({
+  client: publicClientFor(network),
+  chainId: network.chainId,
+  remit: loaded.remit,
+  limits: loaded.limits,
+  rolesModifier,
+  agent: cast.agent.address,
+  ...(deployment.rolesDeployedBlock === undefined
+    ? {}
+    : { fromBlock: BigInt(deployment.rolesDeployedBlock) }),
+  ...(loaded.signatures.length === 0 ? {} : { signatures: loaded.signatures }),
+});
+
+if (!drift.ok) {
+  for (const finding of drift.findings) {
+    say(`DRIFT     ${finding.code}: ${finding.detail}`);
+  }
+  logEvent("exec.mainnet.drift", {
+    network: network.name,
+    findings: drift.findings.map((finding) => finding.code),
+  });
+
+  if (!args.flags.has("ignore-drift")) {
+    fail(
+      "the Remit and the chain disagree — nothing was sent. Fix the preset with " +
+        "roles:diff and roles:apply, or reissue the Remit. Do not widen either to make " +
+        "this pass. If you know exactly which difference this is, --ignore-drift.",
+    );
+  }
+  say("--ignore-drift: proceeding against an operator's explicit judgement");
+}
+
+say(
+  `preset    ${drift.eventsReplayed} event(s) replayed as of block ${drift.asOfBlock}` +
+    `${drift.ok ? " — the chain says what the Remit says" : ""}`,
+);
+say(
+  loaded.signatures.length === 0
+    ? "signed    no — the Remit is unsigned; the preset is still the authority"
+    : `signed    ${loaded.signatures.length} owner signature(s), checked against the Safe's current owners`,
+);
+
 const kind = option(args, "kind") ?? "supply";
-const amount = parseUnits(option(args, "amount") ?? "1", USDC_DECIMALS);
+/** Refused here rather than at G1, so the message names the flag the operator typed. */
+const amountArg = option(args, "amount") ?? "1";
+const amount = (() => {
+  try {
+    const parsed = parseUnits(amountArg, USDC_DECIMALS);
+    if (parsed <= 0n) fail(`--amount must be greater than zero, not "${amountArg}"`);
+    return parsed;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("--amount")) throw error;
+    return fail(`--amount "${amountArg}" is not a decimal amount of USDC — nothing sent`);
+  }
+})();
 const counterparty =
   option(args, "to") ??
   (kind === "approve" ? AAVE_POOL_FOR(network.chainId) : loaded.remit.safe);
@@ -118,6 +192,11 @@ logEvent("exec.mainnet.preamble", {
   remitHash: loaded.remitHash,
 });
 
+const reviewTimeoutSeconds = numberOption(args, "review-timeout", {
+  min: 1,
+  max: 86_400,
+});
+
 const result = await runPipeline({
   network,
   remit: loaded.remit,
@@ -127,12 +206,18 @@ const result = await runPipeline({
   agent: cast.agent,
   intent,
   receiptsRoot: RECEIPTS_ROOT,
-  // G3 only exists when somebody is watching. `--review` turns it on and points it at
-  // the queue the console reads; without it the receipt records that nobody looked.
-  ...(args.flags.has("review") ? { reviewDir: REVIEW_ROOT } : {}),
-  ...(option(args, "review-timeout") === undefined
-    ? {}
-    : { reviewTimeoutSeconds: Number(option(args, "review-timeout")) }),
+  // G3 is on. It used to need `--review`, which meant the human gate could be removed
+  // by forgetting a flag — and the flag was easy to forget precisely on the runs where
+  // it mattered. `--no-review` still exists, has to be typed, and puts "nobody looked"
+  // in the receipt rather than quietly leaving G3 out of it.
+  ...(args.flags.has("no-review")
+    ? { whenUnreviewable: "proceed" as const }
+    : {
+        reviewDir: REVIEW_ROOT,
+      }),
+  // Refused where it was typed. A `NaN` timeout is no wait at all rather than a long
+  // one, and G3 would then refuse instantly with nobody having had the chance to look.
+  ...(reviewTimeoutSeconds === undefined ? {} : { reviewTimeoutSeconds }),
 });
 
 if (result.stage !== "g4") {

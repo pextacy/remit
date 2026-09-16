@@ -206,6 +206,37 @@ describe("safe/policy-check", () => {
     expect(result).not.toHaveProperty("allowed");
   });
 
+  it("reports an RPC that dies mid-call as a failed check, not as a refusal", async () => {
+    // The provider is obtained and *then* the call fails — failover exhausted, a
+    // timeout, a 502. This is the likely shape of an outage, and it used to reach the
+    // classifier, fall through to its default and come back as
+    // `allowed: false, reason: "The call would revert: ..."`. A workflow author
+    // branching on `allowed` stopped for a policy refusal that never happened.
+    mockExecuteWithFailover.mockRejectedValueOnce(
+      Object.assign(new Error("could not detect network"), { code: "NETWORK_ERROR" })
+    );
+
+    const result = await policyCheckStep(input);
+
+    expect(result).toMatchObject({ success: false });
+    expect(result).not.toHaveProperty("allowed");
+    expect((result as { error: string }).error).toContain("could not reach the chain");
+  });
+
+  it("a revert with no return data is still an answer", async () => {
+    // `CALL_EXCEPTION` with nothing in `data` — a call to an address with no code, or a
+    // bare `require(false)`. The chain answered; it just said nothing. That is a
+    // refusal to report, not an outage, and the distinction has to survive the guard
+    // that keeps outages out.
+    mockExecuteWithFailover.mockRejectedValueOnce(
+      Object.assign(new Error("execution reverted"), { code: "CALL_EXCEPTION" })
+    );
+
+    const result = await policyCheckStep(input);
+
+    expect(result).toMatchObject({ success: true, allowed: false });
+  });
+
   it("rejects a malformed contract address before touching the chain", async () => {
     const result = await policyCheckStep({ ...input, contractAddress: "not-an-address" });
 

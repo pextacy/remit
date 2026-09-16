@@ -24,6 +24,19 @@ export type Deployment = {
   rolesDeployedBlock?: number;
   roleKey?: Hex;
   agentSigner?: Address;
+  /**
+   * The highest Remit nonce ever issued for this (safe, roleKey).
+   *
+   * Kept here rather than derived from `ops/remits/<network>.json`, which is the file
+   * `remit:issue` is about to overwrite: reading the next nonce out of it meant restoring
+   * an older Remit walked the sequence backwards, and the next issue produced a second,
+   * different Remit wearing a nonce that was already taken. "A reissued Remit never
+   * collides with its ancestor" is the whole reason the field exists.
+   *
+   * The pair it belongs to is stored with it, so a new Safe or a new role starts its own
+   * sequence rather than inheriting somebody else's high-water mark.
+   */
+  lastRemit?: { safe: Address; roleKey: Hex; nonce: string };
   presetAppliedAt?: string;
   updatedAt: string;
 };

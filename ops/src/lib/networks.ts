@@ -22,13 +22,29 @@ export type Network = {
 
 const DEFAULT_ANVIL_RPC = "http://127.0.0.1:8545";
 
+/**
+ * An environment variable that is set to nothing is not a value.
+ *
+ * `process.env.X ?? fallback` only falls back on `undefined`, and `.env.example` ships
+ * every optional RPC as `BASE_SEPOLIA_RPC_URL=` with nothing after it — which is how an
+ * operator is *told* to leave one unset. Sourcing that gave viem an empty URL and
+ * "No URL was provided to the Transport", pointing at a library rather than at the line
+ * the operator wrote. The mainnet branch below already treated empty as unset; the other
+ * three did not, so following the repository's own example file broke three networks and
+ * left the fourth working.
+ */
+function envUrl(name: string, fallback: string): string {
+  const value = process.env[name];
+  return value === undefined || value.trim() === "" ? fallback : value.trim();
+}
+
 export function resolveNetwork(name: string): Network {
   switch (name) {
     case "anvil":
       return {
         name: "anvil",
         chainId: BASE_SEPOLIA,
-        rpcUrl: process.env.ANVIL_RPC_URL ?? DEFAULT_ANVIL_RPC,
+        rpcUrl: envUrl("ANVIL_RPC_URL", DEFAULT_ANVIL_RPC),
         canImpersonate: true,
         isMainnet: false,
       };
@@ -40,7 +56,7 @@ export function resolveNetwork(name: string): Network {
       return {
         name: "anvil-base",
         chainId: BASE,
-        rpcUrl: process.env.ANVIL_BASE_RPC_URL ?? "http://127.0.0.1:8547",
+        rpcUrl: envUrl("ANVIL_BASE_RPC_URL", "http://127.0.0.1:8547"),
         canImpersonate: true,
         // Not mainnet: nothing here reaches a public chain. The ceremony is rehearsed
         // anyway, because a path only practised without its flags is a path nobody has
@@ -51,12 +67,12 @@ export function resolveNetwork(name: string): Network {
       return {
         name: "base-sepolia",
         chainId: BASE_SEPOLIA,
-        rpcUrl: process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org",
+        rpcUrl: envUrl("BASE_SEPOLIA_RPC_URL", "https://sepolia.base.org"),
         canImpersonate: false,
         isMainnet: false,
       };
     case "base": {
-      const rpcUrl = process.env.BASE_RPC_URL;
+      const rpcUrl = process.env.BASE_RPC_URL?.trim();
       if (rpcUrl === undefined || rpcUrl === "") {
         fail("BASE_RPC_URL is required for --network base");
       }

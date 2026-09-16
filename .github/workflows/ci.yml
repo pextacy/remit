@@ -24,9 +24,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r --if-present type-check
       - run: pnpm lint
-      # `test` is a no-op until P2 lands the first suite (PLAN.md 1.6). It stays
-      # in the pipeline so the suite runs from the commit that introduces it.
+      # The gates, the hashes and the receipt chain, as unit tests: no chain, no clock,
+      # no filesystem outside a temporary directory. The `gates` job below proves the
+      # same rules against a real fork; this one proves them in two seconds on every push.
       - run: pnpm -r --if-present test
+      # The console is the operator's only screen on any of this. A build that breaks is
+      # a screen that is not there when it is wanted.
+      - run: pnpm --filter remit-console build
 
   python:
     runs-on: ubuntu-latest
@@ -41,6 +45,9 @@ jobs:
       - run: uv sync --all-groups
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      # The adapter's refusals, the ledger's fail-closed rule, and the one correlation
+      # rule that decides whether a receipt may carry a transaction hash at all.
+      - run: uv run pytest tests -q
       # The bridge calls the TypeScript core across a process boundary. If that call
       # breaks, every gate the bridge runs is skipped rather than failed, so the wiring
       # is checked on every push.
@@ -83,6 +90,28 @@ jobs:
       - name: The addresses still exist on chain
         run: pnpm --filter @remit/core verify:constants
 
+      # Two things a flag can be that the gate would only catch later, and one it would
+      # not catch at all: an amount that is not a number, one that is negative, and a
+      # function signature that is not a signature. Each is refused where it was typed.
+      - name: A flag that is not what it claims is refused where it was typed
+        run: |
+          set -u
+          fails() {
+            if "$@" >/tmp/flag.log 2>&1; then
+              echo "::error::$* was accepted"; cat /tmp/flag.log; exit 1
+            fi
+          }
+          fails pnpm --filter ops propose --network anvil --kind supply --amount -1
+          fails pnpm --filter ops propose --network anvil --kind supply --amount abc
+          fails pnpm --filter ops propose --network anvil --kind supply --amount 0
+          # A `--review-timeout` that is not a number is worse than the others: `Number("9O")`
+          # is NaN, and a NaN deadline has already passed — so G3 refused instantly with
+          # nobody having had the chance to look. A human gate a typo can remove is not one.
+          fails pnpm --filter ops propose --network anvil --kind supply --amount 2 --review-timeout 9O
+          fails pnpm --filter ops propose --network anvil --kind supply --amount 2 --review-timeout 0
+          echo "every malformed flag was refused before anything was proposed"
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
       - name: P1 — value leaves a Safe through Roles, and refusals have names
         run: pnpm --filter ops p1 --network anvil
         env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
@@ -96,12 +125,279 @@ jobs:
           pnpm --filter ops remit:sign --network anvil
         env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
 
+      # The caps that bound the money live in the Remit, not in the preset — `amount` is
+      # `Pass` on chain. So reissuing with a larger cap is the operator granting the agent
+      # more than it had, and it takes the same word `roles:apply` takes for widening a
+      # preset. It used to take nothing at all.
+      - name: A Remit that permits more than the one it replaces needs a word
+        run: |
+          set -eu
+          caps() {
+            python3 -c "import json, sys; b = json.load(open('ops/remits/anvil.json')); print(b['limits']['perTxCapUsd'], b['limits']['dailyCapUsd'], b['remit']['nonce'])"
+          }
+          issue() {
+            pnpm --filter ops remit:issue --network anvil \
+              --strategy strategies/remit_usdc_lender/strategy.py \
+              --workflow ops/workflows/exec-with-role.workflow.json "$@"
+          }
+
+          # Narrowing is what fixing a mistake looks like, and costs no flag.
+          issue --per-tx 1 --daily 2
+          [ "$(caps | cut -d" " -f1,2)" = "1 2" ] || {
+            echo "::error::narrowing was refused"; exit 1
+          }
+          before=$(caps)
+
+          # Widening is refused, and nothing is written.
+          if issue --per-tx 50 --daily 100 > /tmp/widen.log 2>&1; then
+            cat /tmp/widen.log
+            echo "::error::a widened Remit was issued without a word"; exit 1
+          fi
+          cat /tmp/widen.log
+          grep -q "WIDENS AUTHORITY" /tmp/widen.log
+          grep -q "perTxCapUsd 1 → 50" /tmp/widen.log
+          [ "$(caps)" = "$before" ] || {
+            echo "::error::the refused issue still changed the Remit"; exit 1
+          }
+
+          # A new recipient is a widening no cap comparison would see, and it is the line
+          # the README calls the whole talk.
+          issue --per-tx 1 --daily 2 --yes
+          echo "narrowing is silent; widening is named and refused"
+
+          # A rolled-back Remit file must not walk the sequence backwards: two different
+          # documents at one nonce is the ambiguity the field exists to remove.
+          cp ops/remits/anvil.json /tmp/remit-old.json
+          used=$(caps | cut -d" " -f3)
+          # Same caps throughout, so the only thing under test is the sequence.
+          issue --per-tx 1 --daily 2
+          cp /tmp/remit-old.json ops/remits/anvil.json
+          issue --per-tx 1 --daily 2
+          now=$(caps | cut -d" " -f3)
+          [ "$now" -gt "$((used + 1))" ] || {
+            echo "::error::the nonce repeated after the Remit file was rolled back"
+            exit 1
+          }
+          echo "a rolled-back Remit file does not reuse a nonce"
+
+          # Back to the caps the rest of this job assumes.
+          issue --yes
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
       - name: G1 refuses what it claims to
         run: pnpm --filter ops g1 --network anvil
         env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
 
       - name: The chain says what the preset says
         run: pnpm --filter ops roles:diff --network anvil
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
+      # `roles:diff` is the control (PRD.md §9) and it reads the role by replaying the
+      # modifier's own events, because Roles 2.1.0 has no getter for its scopes. That
+      # reconstruction is worth nothing unless it matches what the storage actually does,
+      # and on one event it did not: `revokeTarget` clears a target's *clearance* and
+      # leaves every per-function scope exactly where it was, so re-scoping the target
+      # brings them all back with no `ScopeFunction` in between. The replay cleared them,
+      # reported zero functions, and the diff answered "no difference" about a role that
+      # could call them.
+      #
+      # Asserted against the deployed 2.1.0 mastercopy rather than against a fixture,
+      # because it is a claim about the contract.
+      - name: A function that survives a target revoke is still in the diff
+        run: |
+          set -eu
+          trap 'rm -f ops/leak.ts' EXIT
+          cat > ops/leak.ts <<'TS'
+          import { readRole, rolesAbi, USDC } from "@remit/core";
+          import { encodeFunctionData, parseAbi, toFunctionSelector } from "viem";
+          import { castFor } from "./src/lib/actors.js";
+          import { publicClientFor } from "./src/lib/clients.js";
+          import { requireDeployment, requireField } from "./src/lib/deployment.js";
+          import { preflight } from "./src/lib/exec-role.js";
+          import { say } from "./src/lib/log.js";
+          import { resolveNetwork } from "./src/lib/networks.js";
+          import { execSafeTx, safeCall } from "./src/lib/safe.js";
+
+          const network = resolveNetwork("anvil");
+          const cast = await castFor(network);
+          const d = requireDeployment(network.name);
+          const safe = requireField(d, "safe");
+          const roles = requireField(d, "rolesModifier");
+          const roleKey = requireField(d, "roleKey");
+          const usdc = USDC[network.chainId];
+          const selector = toFunctionSelector("transfer(address,uint256)");
+          // USDC out of the Safe to an address that is not the Safe: the one call the
+          // whole preset exists to make unrepresentable.
+          const exfiltrate = encodeFunctionData({
+            abi: parseAbi([
+              "function transfer(address to, uint256 amount) returns (bool)",
+            ]),
+            functionName: "transfer",
+            args: [cast.attacker, 1000000n],
+          });
+
+          async function owner(fn: string, args: unknown[]): Promise<void> {
+            await execSafeTx(
+              network,
+              safe,
+              cast.signingOwners,
+              safeCall(
+                roles,
+                encodeFunctionData({
+                  abi: rolesAbi,
+                  functionName: fn as "revokeTarget",
+                  args: args as never,
+                }),
+              ),
+              `roles.${fn}`,
+            );
+          }
+
+          async function allowed(): Promise<boolean> {
+            const r = await preflight(network, roles, roleKey, cast.agent.address, {
+              label: "transfer",
+              target: usdc,
+              data: exfiltrate,
+            });
+            return r.ok;
+          }
+
+          function must(condition: boolean, message: string): void {
+            if (!condition) throw new Error(message);
+          }
+
+          must(!(await allowed()), "transfer was callable before anything");
+
+          await owner("scopeFunction", [
+            roleKey,
+            usdc,
+            selector,
+            [
+              { parent: 0, paramType: 5, operator: 5, compValue: "0x" },
+              { parent: 0, paramType: 1, operator: 0, compValue: "0x" },
+              { parent: 0, paramType: 1, operator: 0, compValue: "0x" },
+            ],
+            0,
+          ]);
+          await owner("revokeTarget", [roleKey, usdc]);
+          await owner("scopeTarget", [roleKey, usdc]);
+
+          // The contract's behaviour, restated every run. If this ever stops being true,
+          // the replay rule in `readRole` is the thing to revisit — not this line.
+          must(
+            await allowed(),
+            "revokeTarget now clears function scopes — revisit readRole",
+          );
+
+          const role = await readRole(publicClientFor(network), roles, roleKey, {
+            ...(d.rolesDeployedBlock === undefined
+              ? {}
+              : { fromBlock: BigInt(d.rolesDeployedBlock) }),
+          });
+          must(
+            role.targets.get(usdc)?.functions.has(selector) === true,
+            "the replay cannot see a function the chain permits — roles:diff is blind",
+          );
+
+          say("RESULT the surviving scope is visible to the replay");
+          TS
+          pnpm --filter ops exec tsx leak.ts | tee /tmp/leak.log
+          grep -q "RESULT the surviving scope is visible" /tmp/leak.log
+
+          # And the control an operator actually reads has to name it, above the fold.
+          pnpm --filter ops roles:diff --network anvil > /tmp/diff.log 2>&1 || true
+          cat /tmp/diff.log
+          grep -q "ON CHAIN, NOT IN THE PRESET" /tmp/diff.log || {
+            echo "::error::roles:diff did not report authority the preset does not list"
+            exit 1
+          }
+          grep -q "what the agent can already do" /tmp/diff.log || {
+            echo "::error::the diff summary buried it"; exit 1
+          }
+
+          # Put the role back the way every step after this one expects it.
+          cat > ops/leak.ts <<'TS'
+          import { rolesAbi, USDC } from "@remit/core";
+          import { encodeFunctionData, toFunctionSelector } from "viem";
+          import { castFor } from "./src/lib/actors.js";
+          import { requireDeployment, requireField } from "./src/lib/deployment.js";
+          import { resolveNetwork } from "./src/lib/networks.js";
+          import { execSafeTx, safeCall } from "./src/lib/safe.js";
+
+          const network = resolveNetwork("anvil");
+          const cast = await castFor(network);
+          const d = requireDeployment(network.name);
+          await execSafeTx(
+            network,
+            requireField(d, "safe"),
+            cast.signingOwners,
+            safeCall(
+              requireField(d, "rolesModifier"),
+              encodeFunctionData({
+                abi: rolesAbi,
+                functionName: "revokeFunction",
+                args: [
+                  requireField(d, "roleKey"),
+                  USDC[network.chainId],
+                  toFunctionSelector("transfer(address,uint256)"),
+                ],
+              }),
+            ),
+            "roles.revokeFunction",
+          );
+          TS
+          pnpm --filter ops exec tsx leak.ts
+          pnpm --filter ops roles:diff --network anvil
+          echo "the diff sees what the chain kept"
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
+      # A second member of the role holds the identical preset, is named by no Remit and
+      # no receipt, and is revoked by nothing: `kill` acts on the agent the deployment
+      # recorded, so pulling it reports success while the other address keeps the whole
+      # authority. It is the drift that leaves the preset itself spotless, which is why
+      # checking the preset alone never found it.
+      - name: A member nobody recorded is caught before anything is spent
+        run: |
+          set -eu
+          stranger=0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc
+
+          # Granting to an address that is not the agent of record has to be said out
+          # loud, because every later command acts on the recorded one.
+          if pnpm --filter ops role:assign --network anvil --member "$stranger" \
+               > /tmp/assign.log 2>&1; then
+            cat /tmp/assign.log
+            echo "::error::the role was granted to an unrecorded address without a word"
+            exit 1
+          fi
+          grep -q "not the agent recorded" /tmp/assign.log
+
+          pnpm --filter ops role:assign --network anvil --member "$stranger" --new-agent
+
+          # All three surfaces have to see it: the control an operator reads, the
+          # pre-spend checklist, and the check that gates the bridge starting at all.
+          pnpm --filter ops roles:diff --network anvil > /tmp/diff.log 2>&1 || true
+          grep -q "NOT THE AGENT OF RECORD" /tmp/diff.log || {
+            cat /tmp/diff.log; echo "::error::roles:diff did not flag it"; exit 1
+          }
+
+          pnpm --filter ops mainnet:preflight --network anvil > /tmp/pre.log 2>&1 || true
+          grep -q "NO   nobody else is in the role" /tmp/pre.log || {
+            cat /tmp/pre.log; echo "::error::the preflight did not flag it"; exit 1
+          }
+
+          uv run --directory packages/remit-bridge remit serve \
+            --network anvil --port 50099 --once > /tmp/serve-drift.log 2>&1 || true
+          grep -q "REMIT_EXTRA_ROLE_MEMBER" /tmp/serve-drift.log || {
+            cat /tmp/serve-drift.log
+            echo "::error::the bridge started against a role with an extra member"; exit 1
+          }
+
+          # Put it back: the agent of record, and only it, in the role.
+          pnpm --filter ops role:assign --network anvil \
+            --member 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 --new-agent
+          pnpm --filter ops role:assign --network anvil --revoke --member "$stranger"
+          pnpm --filter ops roles:diff --network anvil
+          echo "an unrecorded member is refused by the diff, the preflight and the bridge"
         env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
 
       - name: Every non-happy path, with a receipt for each
@@ -115,8 +411,314 @@ jobs:
         run: uv run --directory packages/remit-bridge remit verify --network anvil
         env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
 
+      # The daily cap is a read-modify-write over a ledger written only after the chain
+      # has answered. Two proposals evaluating it against the same state each see a day
+      # in which nothing has been spent — and `dailyCapUsd` becomes a per-process cap.
+      # Every gate above passes while that is true, so it is asserted separately.
+      - name: Two proposals at once cannot both spend the day
+        run: |
+          set -eu
+          rm -f ops/deployments/anvil.ledger.json
+          pnpm --filter ops remit:issue --network anvil \
+            --strategy strategies/remit_usdc_lender/strategy.py \
+            --workflow ops/workflows/exec-with-role.workflow.json \
+            --per-tx 1 --daily 1
+          pnpm --filter ops run exec --network anvil --action approve --amount 100
+
+          # 0.6 + 0.6 against a 1 USD day. Exactly one may land.
+          pnpm --filter ops propose --network anvil --kind supply --amount 0.6 > /tmp/one.log 2>&1 &
+          first=$!
+          pnpm --filter ops propose --network anvil --kind supply --amount 0.6 > /tmp/two.log 2>&1 &
+          second=$!
+          wait $first || true
+          wait $second || true
+          cat /tmp/one.log /tmp/two.log
+
+          landed=$(grep -c "G4 PASS" /tmp/one.log /tmp/two.log | grep -c ":1" || true)
+          refused=$(grep -l "REMIT_CAP_EXCEEDED_DAILY" /tmp/one.log /tmp/two.log | wc -l || true)
+          [ "$refused" -eq 1 ] || {
+            echo "::error::the daily cap did not hold under two concurrent proposals"
+            exit 1
+          }
+          entries=$(python3 -c "import json;print(len(json.load(open('ops/deployments/anvil.ledger.json'))))")
+          [ "$entries" -eq 1 ] || {
+            echo "::error::the ledger holds $entries entries, expected 1"; exit 1
+          }
+          echo "one landed ($landed), one refused on the cap, one ledger entry"
+
+          # Back to the caps every other step and the README assume. A Remit reissued
+          # mid-chain is also what leaves the console a chain spanning two of them, which
+          # the next step checks it reports as history rather than as damage.
+          #
+          # `--yes` because this *is* a widening — 1 USD back up to 5 — and reissuing a
+          # Remit that permits more than the one it replaces takes the same word from an
+          # operator that widening the on-chain preset does.
+          rm -f ops/deployments/anvil.ledger.json
+          pnpm --filter ops remit:issue --network anvil \
+            --strategy strategies/remit_usdc_lender/strategy.py \
+            --workflow ops/workflows/exec-with-role.workflow.json --yes
+          pnpm --filter ops remit:sign --network anvil
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
+      # G3 is a gate, not a note in a receipt. It used to be skipped whenever no queue was
+      # configured, so the human gate could be removed by omitting a flag — and the flag
+      # was easiest to forget on exactly the runs where it mattered.
+      #
+      # Three properties, on a real chain: an action over the threshold stops; silence
+      # refuses it; and the explicit escape hatch proceeds and says nobody looked. The
+      # item left waiting at the end is what the console step below answers.
+      - name: An action over the threshold stops for a person
+        run: |
+          set -eu
+          pnpm --filter ops run exec --network anvil --action approve --amount 100
+
+          # Silence is a refusal, not an approval that took a while.
+          pnpm --filter ops propose --network anvil --kind supply --amount 2 \
+            --review-timeout 5 > /tmp/silence.log 2>&1 || true
+          grep -q "G3 TIMEOUT" /tmp/silence.log || {
+            cat /tmp/silence.log
+            echo "::error::silence did not refuse"; exit 1
+          }
+          latest=$(ls receipts/anvil/*.json | tail -1)
+          grep -q '"outcome": "declined_g3"' "$latest" || {
+            echo "::error::the timeout left no declined_g3 receipt"; exit 1
+          }
+
+          # The escape hatch has to be typed, and the chain has to show it was.
+          pnpm --filter ops propose --network anvil --kind supply --amount 2 \
+            --no-review > /tmp/unreviewed.log 2>&1
+          grep -q "G3 SKIPPED" /tmp/unreviewed.log || {
+            cat /tmp/unreviewed.log
+            echo "::error::--no-review did not record that nobody looked"; exit 1
+          }
+
+          # And one left waiting, for the console to answer.
+          pnpm --filter ops propose --network anvil --kind supply --amount 2 \
+            --review-timeout 120 > /tmp/review.log 2>&1 &
+          for i in $(seq 1 40); do
+            ls ops/review/pending/*.json >/dev/null 2>&1 && break
+            sleep 1
+          done
+          ls ops/review/pending/*.json >/dev/null 2>&1 || {
+            cat /tmp/review.log; echo "::error::nothing reached the review queue"; exit 1
+          }
+          echo "G3 holds, refuses on silence, and records an explicit skip"
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
+      - name: The console renders every screen against a real deployment
+        run: |
+          set -eu
+          pnpm --filter remit-console build
+          REMIT_NETWORK=anvil pnpm --filter remit-console start >/tmp/console.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://127.0.0.1:3737/ && break
+            sleep 1
+          done
+          # Every route, including the one that reads the chain. A 500 here is an
+          # operator with no screen at the moment they most want one.
+          for route in / /review /ledger /remit /kill; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:3737$route")
+            echo "$route $code"
+            [ "$code" = "200" ] || { cat /tmp/console.log; exit 1; }
+          done
+          # A tampered receipt must reach the screen as a named problem rather than as a
+          # blank page — the console's whole value is that it says when something is wrong.
+          target=$(ls receipts/anvil/*.json | head -1)
+          cp "$target" /tmp/receipt.bak
+          python3 -c "import json,sys;p=sys.argv[1];d=json.load(open(p));d['network']='tampered';json.dump(d,open(p,'w'))" "$target"
+          curl -s http://127.0.0.1:3737/ledger | grep -q "does not prove what it claims" \
+            || { echo "::error::the console did not report a tampered receipt"; exit 1; }
+          cp /tmp/receipt.bak "$target"
+
+          # G3 is a person's answer, and a server action is a public endpoint whatever
+          # the page around it looks like. A decision reaching the console from anywhere
+          # but this machine must be refused and must write nothing.
+          id=$(ls ops/review/pending | head -1 | sed 's/\.json$//')
+          action=$(curl -s http://127.0.0.1:3737/review | grep -oE 'ACTION_ID_[a-f0-9]+' | head -1)
+          curl -s -X POST http://127.0.0.1:3737/review \
+            -H "Host: remit.example.com" -H "Origin: http://remit.example.com" \
+            -F "\$$action=" -F "id=$id" -F "decision=approved" -F "by=stranger" \
+            -o /dev/null
+          if [ -e "ops/review/decisions/$id.json" ]; then
+            echo "::error::G3 was answered from off this machine"; exit 1
+          fi
+
+          # The same thing, with the host it claims set to loopback. This is the case the
+          # check used to miss entirely: `Host` is written by whoever sends the request,
+          # and a proxy in front of the console rewrites it to the origin it forwards to —
+          # so every request through one read as local. What cannot be typed from
+          # elsewhere is the socket, which is what `x-forwarded-for` carries.
+          curl -s -X POST http://127.0.0.1:3737/review \
+            -H "Host: 127.0.0.1:3737" -H "Origin: http://127.0.0.1:3737" \
+            -H "X-Forwarded-For: 203.0.113.9" \
+            -F "\$$action=" -F "id=$id" -F "decision=approved" -F "by=stranger" \
+            -o /dev/null
+          if [ -e "ops/review/decisions/$id.json" ]; then
+            echo "::error::G3 was answered by something claiming to be this machine"
+            exit 1
+          fi
+
+          # And through a proxy that *appends* rather than replaces, so the address the
+          # client claimed is at the head of the list. Trusting the leftmost entry would
+          # be trusting the attacker.
+          curl -s -X POST http://127.0.0.1:3737/review \
+            -H "Host: 127.0.0.1:3737" -H "Origin: http://127.0.0.1:3737" \
+            -H "X-Forwarded-For: 127.0.0.1, 203.0.113.9" \
+            -F "\$$action=" -F "id=$id" -F "decision=approved" -F "by=stranger" \
+            -o /dev/null
+          if [ -e "ops/review/decisions/$id.json" ]; then
+            echo "::error::G3 trusted the first hop in a forwarded-for chain"; exit 1
+          fi
+
+          # And the same decision, from this machine, is taken — so the refusal above is
+          # the check working rather than the form being broken.
+          curl -s -X POST http://127.0.0.1:3737/review \
+            -H "Origin: http://127.0.0.1:3737" \
+            -F "\$$action=" -F "id=$id" -F "decision=declined" -F "by=ci" \
+            -o /dev/null
+          if [ ! -e "ops/review/decisions/$id.json" ]; then
+            echo "::error::G3 could not be answered from this machine either"; exit 1
+          fi
+          echo "G3 took the local decision and refused every remote spelling of one"
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
+      # A review takes as long as a person takes, and the first pass through G1 answered
+      # about `now` as it was before anybody looked. A Remit that lapses while somebody is
+      # deciding is authority the operator had already withdrawn — and approving just
+      # after it lapsed used to spend it.
+      - name: A Remit that expires during the review is not spent
+        run: |
+          set -eu
+          cp ops/remits/anvil.json /tmp/remit.bak
+          rm -rf ops/review
+          pnpm --filter ops run exec --network anvil --action approve --amount 100
+
+          python3 - <<'PY'
+          import json, time
+          path = "ops/remits/anvil.json"
+          bundle = json.load(open(path))
+          now = int(time.time())
+          bundle["remit"]["notBefore"] = now - 10
+          bundle["remit"]["notAfter"] = now + 25
+          # The file's claim about its own hash is re-derived on load; drop it rather than
+          # leave one that no longer matches the document.
+          bundle.pop("remitHash", None)
+          bundle.pop("signatures", None)
+          json.dump(bundle, open(path, "w"), indent=2)
+          PY
+
+          pnpm --filter ops propose --network anvil --kind supply --amount 2 \
+            --review-timeout 90 > /tmp/expiry.log 2>&1 &
+          for i in $(seq 1 40); do
+            ls ops/review/pending/*.json >/dev/null 2>&1 && break
+            sleep 1
+          done
+
+          # Approve *after* it has lapsed.
+          expires=$(python3 -c "import json;print(json.load(open('ops/remits/anvil.json'))['remit']['notAfter'])")
+          while [ "$(date +%s)" -le "$expires" ]; do sleep 2; done
+          id=$(ls ops/review/pending | head -1 | sed 's/\.json$//')
+          mkdir -p ops/review/decisions
+          python3 -c "import json,time,sys;json.dump({'id':sys.argv[1],'at':int(time.time()),'decision':'approved','by':'ci'},open('ops/review/decisions/'+sys.argv[1]+'.json','w'))" "$id"
+
+          for i in $(seq 1 60); do
+            grep -qE "^G1 REFUSED|^G4" /tmp/expiry.log && break
+            sleep 2
+          done
+          cat /tmp/expiry.log
+          grep -q "REMIT_EXPIRED" /tmp/expiry.log || {
+            echo "::error::an approval after the Remit lapsed was spent anyway"; exit 1
+          }
+          grep -qE "^G4" /tmp/expiry.log && {
+            echo "::error::the action reached the chain after the Remit lapsed"; exit 1
+          }
+          cp /tmp/remit.bak ops/remits/anvil.json
+          echo "the approval was taken and the lapsed authority was not spent"
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
+      # The product path's G3. The bridge used to record "skipped" and submit anyway, so
+      # a strategy's action over the review threshold reached KeeperHub with nobody
+      # having looked at it. This is a real strategy decision, held and then refused by
+      # silence — on the same queue the console reads.
+      - name: The bridge holds a strategy's action for a person
+        run: |
+          set -eu
+          rm -rf ops/review
+          pnpm --filter ops run exec --network anvil --action approve --amount 100
+          uv run --directory packages/remit-bridge remit serve \
+            --network anvil --port 50061 --review-timeout 20 > /tmp/g3serve.log 2>&1 &
+          for i in $(seq 1 60); do grep -q "listening" /tmp/g3serve.log && break; sleep 1; done
+
+          uv run --directory packages/remit-bridge python -m remit_bridge.drive \
+            --network anvil --port 50061 > /tmp/g3drive.log 2>&1 || true
+
+          grep -q '"outcome": "waiting"' /tmp/g3serve.log || {
+            cat /tmp/g3serve.log
+            echo "::error::the bridge did not hold the action for a person"; exit 1
+          }
+          grep -q "G3_TIMEOUT" /tmp/g3drive.log || {
+            cat /tmp/g3drive.log
+            echo "::error::the bridge did not refuse on silence"; exit 1
+          }
+          latest=$(ls receipts/anvil/*.json | tail -1)
+          grep -q '"outcome": "declined_g3"' "$latest" || {
+            echo "::error::the bridge left no declined_g3 receipt"; exit 1
+          }
+          echo "the product path holds, and silence refuses"
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
+      # G3-5, on the path a strategy actually runs through.
+      #
+      # G1 holds an action for review when the strategy has changed version since anybody
+      # last watched this agent act — whatever its size, because a new version's first
+      # transaction is the one worth looking at and it is exactly the one a notional
+      # threshold waves through. The ops pipeline computed that and the bridge did not, so
+      # the rule existed on the hand-run path and was absent from the product one.
+      #
+      # The action below is *at* the review threshold rather than over it, so the only
+      # thing that can hold it is the changed version.
+      - name: A changed strategy version is held for a person, whatever its size
+        run: |
+          set -eu
+          rm -rf ops/review
+          pnpm --filter ops run exec --network anvil --action approve --amount 100
+          # Something has to have executed under the old version for there to be a
+          # version to have changed *from*.
+          pnpm --filter ops propose --network anvil --kind supply --amount 0.5
+
+          cp strategies/remit_usdc_lender/strategy.py /tmp/strategy.bak
+          printf '\n# a version bump nobody has watched act yet\n' \
+            >> strategies/remit_usdc_lender/strategy.py
+          pnpm --filter ops remit:issue --network anvil \
+            --strategy strategies/remit_usdc_lender/strategy.py \
+            --workflow ops/workflows/exec-with-role.workflow.json
+
+          uv run --directory packages/remit-bridge remit run --network anvil \
+            --kind supply --amount 1 --review-timeout 4 > /tmp/g35.log 2>&1 || true
+          cat /tmp/g35.log
+          grep -q "G3 WAITING" /tmp/g35.log || {
+            echo "::error::a changed strategy version was not held for a person"; exit 1
+          }
+          grep -q "the strategy has changed version" /tmp/g35.log || {
+            echo "::error::it was held, but not for the reason G3-5 names"; exit 1
+          }
+
+          # Back to the version every step after this one assumes.
+          cp /tmp/strategy.bak strategies/remit_usdc_lender/strategy.py
+          pnpm --filter ops remit:issue --network anvil \
+            --strategy strategies/remit_usdc_lender/strategy.py \
+            --workflow ops/workflows/exec-with-role.workflow.json
+          pnpm --filter ops remit:sign --network anvil
+          echo "a new strategy version's first action stops, at any size"
+        env: { ANVIL_RPC_URL: http://127.0.0.1:8546 }
+
       - name: A strategy's intent crosses Almanak's seam into the gates
         run: |
+          # G2 simulates the whole call, Aave's `transferFrom` included, so the Safe needs
+          # an allowance before the strategy's supply can be about the gates rather than
+          # about the allowance. Set explicitly: depending on whatever the scenarios above
+          # happened to leave behind makes this step fail for a reason it is not testing.
+          pnpm --filter ops run exec --network anvil --action approve --amount 100
           uv run --directory packages/remit-bridge remit serve \
             --network anvil --port 50051 > /tmp/serve.log 2>&1 &
           for i in $(seq 1 60); do
@@ -215,8 +817,12 @@ jobs:
           set -u
           fail() { echo "::error::$1"; exit 1; }
 
-          git ls-files --error-unmatch .env >/dev/null 2>&1 \
-            && fail ".env is tracked"
+          # Any `.env`, at any depth — not only the one at the root. The console reads a
+          # `.env` of its own in `packages/remit-console/`, and a second place a secret
+          # can live is a second place it can be committed from.
+          tracked_env=$(git ls-files -- '.env' '**/.env' '.env.*' '**/.env.*' \
+            ':!.env.example' ':!**/.env.example')
+          [ -z "$tracked_env" ] || fail ".env is tracked: $tracked_env"
 
           git grep -nIE -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
             && fail "PEM private key in the tree"

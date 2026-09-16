@@ -244,8 +244,10 @@ With `withdraw` revoked, a withdraw intent passed G1 and was refused at G2 with
 `FunctionNotAllowed` — the preset-tightened-after-the-Remit case (NH-2), reached without
 editing a thing.
 
-`roles:apply` now runs the diff first, refuses when there is nothing to do, and on mainnet
-refuses a widening without `--yes`. Read-only scripts (`roles:diff`, `roles:build`,
+`roles:apply` runs the diff first, sends nothing when there is nothing to do, refuses a
+widening without `--yes` on every network, and re-reads the chain afterwards to say
+whether the two now agree — applying only ever adds, so a role with authority the preset
+does not list still has it, and that now exits non-zero rather than reporting success. Read-only scripts (`roles:diff`, `roles:build`,
 `status`, `g1`) are exempt from `--confirm`: making an operator type it to *look* at
 something teaches them to type it without reading, which is the habit the flag exists to
 prevent.

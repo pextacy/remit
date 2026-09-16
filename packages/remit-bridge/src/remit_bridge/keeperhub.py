@@ -29,9 +29,11 @@ chain are fixed before the agent ever runs.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -49,6 +51,60 @@ DIRECT_SUCCESS_STATUSES = frozenset({"completed"})
 #: The routes answer with a poll hint of 2s while a run is in flight.
 DEFAULT_POLL_SECONDS = 2.0
 DEFAULT_MAX_WAIT_SECONDS = 180.0
+
+#: Hosts on which a plaintext base URL is not a leak: a test server on this machine.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+#: What an execution or workflow id may look like before it becomes part of a URL.
+_ID_SHAPED = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+
+def _checked_base_url(base_url: str) -> str:
+    """Refuse a base URL that would send the API key somewhere it must not go.
+
+    `KEEPERHUB_BASE_URL` is an environment variable, and every request built from it
+    carries `Authorization: Bearer kh_…`. Two ways that goes wrong and neither announces
+    itself: `http://` sends the key in clear over the network, and a host that is not
+    KeeperHub sends the key to whoever owns that host — a typo, a stale copy of someone
+    else's `.env`, or an edit nobody reviewed.
+
+    Plaintext is allowed on loopback and nowhere else, because a local stub is how this
+    client is exercised without an account (OQ-1) and a key that never leaves the machine
+    is not a key that leaked.
+    """
+    trimmed = base_url.strip().rstrip("/")
+    if not trimmed:
+        raise ConfigError("KEEPERHUB_BASE_URL is empty")
+
+    parsed = urlsplit(trimmed)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ConfigError(f"KEEPERHUB_BASE_URL must be an http(s) URL, not {base_url!r}")
+
+    if parsed.scheme == "http" and parsed.hostname not in _LOOPBACK_HOSTS:
+        raise ConfigError(
+            f"refusing to talk to {parsed.hostname} over plain http: every request "
+            "carries the KeeperHub API key in an Authorization header, and http sends "
+            "it in clear. Use https, or point KEEPERHUB_BASE_URL at a stub on 127.0.0.1."
+        )
+
+    return trimmed
+
+
+def _checked_id(value: str, *, what: str) -> str:
+    """An id that is about to become part of a URL path.
+
+    A workflow id and an execution id are interpolated straight into a route. A value
+    carrying a slash, a `..` or a control character does not fail — it *succeeds*, at a
+    different path, with the bearer token attached. Ids come from KeeperHub and from the
+    operator's environment, which is two places this module does not control.
+    """
+    text = str(value).strip()
+    if not _ID_SHAPED.match(text):
+        raise ConfigError(
+            f"{what} {value!r} is not an id this client will put in a URL — "
+            "letters, digits, and . _ : - only"
+        )
+    return text
 
 
 class ExecuteAccepted(BaseModel):
@@ -147,7 +203,7 @@ class KeeperHubClient:
                 "KEEPERHUB_API_KEY does not look like a KeeperHub key (kh_…)"
             )
 
-        self._base_url = base_url.rstrip("/")
+        self._base_url = _checked_base_url(base_url)
         self._client = httpx.Client(
             base_url=self._base_url,
             timeout=timeout,
@@ -159,6 +215,7 @@ class KeeperHubClient:
 
     def run_log(self, execution_id: str, *, kind: str = "workflow") -> RunLog:
         """How to read what KeeperHub did with a run, without going through us."""
+        execution_id = _checked_id(execution_id, what="execution id")
         path = (
             f"/api/workflows/executions/{execution_id}/status"
             if kind == "workflow"
@@ -185,9 +242,10 @@ class KeeperHubClient:
         self, workflow_id: str, inputs: dict[str, Any]
     ) -> ExecuteAccepted:
         """Invoke a workflow that was registered in advance, by id (KH-2)."""
+        checked = _checked_id(workflow_id, what="KEEPERHUB_WORKFLOW_ID")
         return self._accepted(
-            self._post(f"/api/workflow/{workflow_id}/execute", inputs),
-            context=f"workflow {workflow_id}",
+            self._post(f"/api/workflow/{checked}/execute", inputs),
+            context=f"workflow {checked}",
         )
 
     def execute_contract_call(
@@ -225,13 +283,15 @@ class KeeperHubClient:
     # ---- reads -----------------------------------------------------------
 
     def direct_status(self, execution_id: str) -> DirectExecutionStatus:
+        checked = _checked_id(execution_id, what="execution id")
         return DirectExecutionStatus.model_validate(
-            self._get(f"/api/execute/{execution_id}/status")
+            self._get(f"/api/execute/{checked}/status")
         )
 
     def workflow_status(self, execution_id: str) -> WorkflowExecutionStatus:
+        checked = _checked_id(execution_id, what="execution id")
         return WorkflowExecutionStatus.model_validate(
-            self._get(f"/api/workflows/executions/{execution_id}/status")
+            self._get(f"/api/workflows/executions/{checked}/status")
         )
 
     def resolve_tx_hash(
@@ -364,8 +424,29 @@ class KeeperHubClient:
         return accepted
 
 
+#: `kh_` followed by the key's body. Matched so it can be removed, never stored.
+_KEY_SHAPED = re.compile(r"kh_[A-Za-z0-9_\-]{8,}")
+
+
+def _redact(value: Any) -> Any:
+    """Strip anything key-shaped out of something we are about to log.
+
+    An error body is a third party's text and it goes into a structured log line
+    verbatim. Some gateways echo the request — headers included — in a 4xx, and
+    `Authorization: Bearer kh_…` is the one string in this process that must never reach
+    a log file (CLAUDE.md §2.4). It costs one substitution and removes the whole class.
+    """
+    if isinstance(value, str):
+        return _KEY_SHAPED.sub("kh_[redacted]", value)
+    if isinstance(value, dict):
+        return {key: _redact(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact(item) for item in value]
+    return value
+
+
 def _safe_json(response: httpx.Response) -> Any:
     try:
-        return response.json()
+        return _redact(response.json())
     except ValueError:
-        return {"raw": response.text[:2000]}
+        return {"raw": _redact(response.text[:2000])}

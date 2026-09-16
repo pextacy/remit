@@ -18,15 +18,27 @@ __pycache__/
 # Fork deployments are regenerated on every run; a real one is evidence and is committed.
 # `anvil-base` names a Safe on a fork of Base mainnet, which a reader could mistake for
 # the real thing — exactly the confusion a mainnet proof must never invite.
+#
+# Named one at a time rather than by a glob, so that `base-sepolia` and `base` — the two
+# that are evidence — stay committable without anyone having to remember an exception.
 ops/deployments/anvil.json
 ops/deployments/anvil-base.json
-ops/deployments/*.ledger.json
 ops/remits/anvil.json
+ops/remits/anvil-base.json
 receipts/anvil/
 receipts/anvil-base/
-ops/remits/anvil-base.json
+
+# The spend ledger, on every network including the real ones. It is operational state
+# rather than evidence: G1 reads it to answer "how much of today is left", it changes on
+# every action, and the durable record of what happened is the receipt chain beside it.
+# Committing it would make every supply a commit and would still not prove anything the
+# receipts do not.
+ops/deployments/*.ledger.json
+
+# The G3 queue: pending items and the decisions that answer them. A queue is a moment,
+# not a record — the receipt says who decided and what they decided.
 ops/review/
-.next/
+
 next-env.d.ts
 
 # Next.js writes its own agent-guidance files into the console package on first run. A
@@ -34,3 +46,11 @@ next-env.d.ts
 # working agreement is the one at the root.
 packages/remit-console/CLAUDE.md
 packages/remit-console/AGENTS.md
+
+# Lock files. `withLock` (TypeScript) and `file_lock` (Python) create these next to what
+# they guard and remove them again; one left behind belongs to a process that died
+# holding it, and is broken by age rather than committed. Named exactly rather than by
+# `*.lock`, which would also swallow `uv.lock`.
+receipts/*/.pipeline.lock
+receipts/*/.append.lock
+ops/deployments/*.ledger.json.lock

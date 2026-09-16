@@ -16,7 +16,7 @@
  *
  * Exit codes: 0 the answer is yes, 2 the answer is a refusal, 1 the input was unusable.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, writeSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   createPublicClient,
@@ -25,6 +25,7 @@ import {
   http,
   keccak256,
   type PublicClient,
+  TransactionReceiptNotFoundError,
   toBytes,
 } from "viem";
 import { z } from "zod";
@@ -36,18 +37,44 @@ import { decodeRevert, formatRevert, isUndecodable } from "./chain/decode-revert
 import { Operation } from "./chain/roles-enums.js";
 import { compileIntent } from "./compile/action.js";
 import { remitDigest } from "./eip712/remit.js";
-import { receiptBodySchema } from "./receipts/schema.js";
-import { appendReceipt, verifyChainAt } from "./receipts/store.js";
+import { receiptBodySchema, receiptSchema } from "./receipts/schema.js";
+import { appendReceipt, readChain, verifyChainAt } from "./receipts/store.js";
+import { reviewItemSchema } from "./review/schema.js";
+import { enqueueReview, readDecision } from "./review/store.js";
 import { checkPresetDrift } from "./roles/drift.js";
 import { intentSchema } from "./schema/intent.js";
 import { limitsHash, limitsSchema } from "./schema/limits.js";
-import { bytes32Schema, chainIdSchema } from "./schema/primitives.js";
+import { addressSchema, bytes32Schema, chainIdSchema } from "./schema/primitives.js";
 import { remitSchema } from "./schema/remit.js";
 import { checkEnvelope } from "./verify/envelope.js";
 import { ledgerEntrySchema } from "./verify/ledger.js";
 
+/**
+ * The one answer, on stdout, and then the exit code.
+ *
+ * `writeSync` on fd 1 rather than `process.stdout.write`. Writes to a *pipe* are
+ * asynchronous on Linux and macOS, and `process.exit` does not wait for them — so a
+ * large answer (`receipt:verify` over a long chain, `preset:check` with several
+ * findings) could be cut off mid-object. Every caller of this CLI is a pipe: the Python
+ * bridge captures stdout for every gate it runs. The bridge would then report "produced
+ * no JSON" and refuse, which is a gate failing for no reason but buffering.
+ *
+ * `EAGAIN` is possible on a non-blocking pipe whose reader is behind; retrying is the
+ * whole handling, because there is nowhere else for the answer to go.
+ */
 function emit(value: unknown, exitCode = 0): never {
-  process.stdout.write(`${JSON.stringify(value)}\n`);
+  const payload = Buffer.from(`${JSON.stringify(value)}\n`, "utf8");
+  let written = 0;
+  while (written < payload.length) {
+    try {
+      written += writeSync(1, payload, written, payload.length - written);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EAGAIN" || code === "EINTR") continue;
+      // stdout is gone (a closed pipe). The exit code is the only thing left to say.
+      break;
+    }
+  }
   process.exit(exitCode);
 }
 
@@ -198,11 +225,16 @@ switch (command) {
     const input = z
       .object({
         rpcUrl: z.string().url(),
-        rolesModifier: z.string(),
+        // Parsed as addresses and calldata, not as strings. `getAddress` used to run
+        // inside the try below, so a typo in an address came back as a *refusal* — the
+        // gate reporting a Roles decision that was never asked for.
+        rolesModifier: addressSchema,
         roleKey: bytes32Schema,
-        agent: z.string(),
-        target: z.string(),
-        calldata: z.string(),
+        agent: addressSchema,
+        target: addressSchema,
+        calldata: z.string().regex(/^0x([0-9a-fA-F]{2})*$/, "not calldata"),
+        /** The chain the caller believes this RPC serves. Checked, not assumed. */
+        chainId: chainIdSchema.optional(),
       })
       .safeParse(readStdin());
     if (!input.success) fail("preflight input invalid", input.error.issues);
@@ -211,20 +243,55 @@ switch (command) {
       transport: http(input.data.rpcUrl),
     }) as PublicClient;
 
+    // G2's answer is only about the chain G2 asked. An RPC URL pointed at the wrong
+    // network answers every question confidently and about the wrong Roles instance —
+    // usually one that does not exist there, which reads as a clean refusal.
+    if (input.data.chainId !== undefined) {
+      let served: number;
+      try {
+        served = await client.getChainId();
+      } catch (error) {
+        emit(
+          {
+            ok: false,
+            reason: `the RPC did not answer: ${
+              error instanceof Error ? error.message.split("\n")[0] : String(error)
+            }`,
+            kind: "rpc_unreachable",
+            code: "RPC_UNREACHABLE",
+            opaque: true,
+          },
+          1,
+        );
+      }
+      if (served !== input.data.chainId) {
+        emit(
+          {
+            ok: false,
+            reason: `the RPC serves chain ${served}, the Remit is for ${input.data.chainId}`,
+            kind: "chain_mismatch",
+            code: "PREFLIGHT_CHAIN_MISMATCH",
+            opaque: false,
+          },
+          1,
+        );
+      }
+    }
+
     try {
       await client.simulateContract({
-        address: getAddress(input.data.rolesModifier),
+        address: input.data.rolesModifier,
         abi: rolesAbi,
         functionName: "execTransactionWithRole",
         args: [
-          getAddress(input.data.target),
+          input.data.target,
           0n,
           input.data.calldata as `0x${string}`,
           Operation.Call,
           input.data.roleKey,
           true,
         ],
-        account: getAddress(input.data.agent),
+        account: input.data.agent,
       });
       emit({ ok: true });
     } catch (error) {
@@ -298,14 +365,33 @@ switch (command) {
         confirmations: Number(head - receipt.blockNumber) + 1,
         gasUsed: receipt.gasUsed.toString(),
       });
-    } catch {
-      emit({
-        ok: true,
-        status: "pending",
-        blockNumber: 0,
-        confirmations: 0,
-        gasUsed: "0",
-      });
+    } catch (error) {
+      // "The node has never heard of this hash" and "the node did not answer" are
+      // different facts, and reporting both as `pending` told a caller a transaction was
+      // in flight when what had actually happened was that the RPC was down. A status
+      // screen that says "pending" because nobody asked is the same failure as a gate
+      // that passes because nobody checked.
+      if (error instanceof TransactionReceiptNotFoundError) {
+        emit({
+          ok: true,
+          status: "pending",
+          blockNumber: 0,
+          confirmations: 0,
+          gasUsed: "0",
+        });
+      }
+      emit(
+        {
+          ok: false,
+          status: "unknown",
+          error: {
+            code: "RPC_UNREACHABLE",
+            message:
+              error instanceof Error ? error.message.split("\n")[0] : String(error),
+          },
+        },
+        1,
+      );
     }
     break;
   }
@@ -353,6 +439,43 @@ switch (command) {
     break;
   }
 
+  // ---- G3, as two commands ------------------------------------------------
+  //
+  // The queue is a directory of JSON files and the console already reads it. What was
+  // missing was a way for the *bridge* to use it: the Python path recorded "G3 skipped"
+  // and carried on, so the one gate whose cost is a person's attention did not exist on
+  // the product path at all. It is reached from here rather than reimplemented there,
+  // for the same reason every other rule is — one schema, one id check, one definition
+  // of what a pending item is.
+  case "review:enqueue": {
+    const input = z
+      .object({ dir: z.string().min(1), item: z.unknown() })
+      .safeParse(readStdin());
+    if (!input.success) fail("review:enqueue input invalid", input.error.issues);
+
+    const item = reviewItemSchema.safeParse(input.data.item);
+    if (!item.success) fail("review item invalid", item.error.issues);
+
+    const file = enqueueReview(resolve(process.cwd(), input.data.dir), item.data);
+    emit({ ok: true, file, id: item.data.id });
+    break;
+  }
+
+  case "review:decision": {
+    const input = z
+      .object({ dir: z.string().min(1), id: z.string().min(1) })
+      .safeParse(readStdin());
+    if (!input.success) fail("review:decision input invalid", input.error.issues);
+
+    const decision = readDecision(resolve(process.cwd(), input.data.dir), input.data.id);
+    // No decision yet and an unreadable one are the same answer here — *not yet* — and
+    // the caller treats silence as a refusal when its deadline passes. Saying "declined"
+    // for a file that failed to parse would attribute a refusal to a person who did not
+    // make it.
+    emit({ ok: true, decided: decision !== undefined, decision: decision ?? null });
+    break;
+  }
+
   case "receipt:append": {
     const input = z
       .object({ dir: z.string().min(1), body: z.unknown() })
@@ -371,6 +494,47 @@ switch (command) {
       body.data,
     );
     emit({ ok: true, file, selfHash: receipt.selfHash, sequence: receipt.sequence });
+    break;
+  }
+
+  /**
+   * G3-5, as a command: the `strategyHash` this agent last actually executed under.
+   *
+   * G1 takes it as an argument and holds the next action for review when it differs from
+   * the one the Remit binds — a new strategy version's first transaction is the one worth
+   * looking at, and it is exactly the one a notional threshold waves through.
+   *
+   * The ops pipeline computed it inline from the chain of receipts and the bridge did
+   * not, so the rule existed on the hand-run path and was absent from the path a strategy
+   * actually runs through. It is read here rather than reimplemented in Python for the
+   * same reason every other rule is: the answer comes from parsing receipts against the
+   * receipt schema, and a second parser is a second answer.
+   */
+  case "receipt:seen": {
+    const input = z.object({ dir: z.string().min(1) }).safeParse(readStdin());
+    if (!input.success) fail("receipt:seen input invalid", input.error.issues);
+
+    // A fresh chain has no receipts, and that is the genesis case rather than an error:
+    // nothing has executed, so there is no previous version to have changed from.
+    const stored = readChain(resolve(process.cwd(), input.data.dir), {
+      allowMissing: true,
+    });
+
+    // Parsed, not cast. `readChain` hands back a record for every file it found,
+    // including ones it could not read, and reading `.outcome` off one of those would
+    // take the process down at G1 — before the gate that exists to refuse cheaply ran.
+    const lastExecuted = [...stored]
+      .reverse()
+      .map((entry) => receiptSchema.safeParse(entry.receipt))
+      .find((parsed) => parsed.success && parsed.data.outcome === "executed");
+
+    emit({
+      ok: true,
+      count: stored.length,
+      seenStrategyHash:
+        lastExecuted?.success === true ? lastExecuted.data.strategyHash : null,
+      sequence: lastExecuted?.success === true ? lastExecuted.data.sequence : null,
+    });
     break;
   }
 
@@ -418,6 +582,8 @@ switch (command) {
   default:
     fail(
       `unknown command ${String(command)}`,
-      "expected one of: envelope, compile, hash, receipt:append, receipt:verify",
+      "expected one of: envelope, compile, hash, preflight, balance, tx:status, " +
+        "preset:check, review:enqueue, review:decision, receipt:append, receipt:seen, " +
+        "receipt:verify",
     );
 }

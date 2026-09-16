@@ -36,7 +36,28 @@ const { rolesModifier, block } = await deployRolesModifier(
   cast.deployer,
   safe,
   salt,
+  ...(deployment.rolesModifier === undefined
+    ? []
+    : [{ known: deployment.rolesModifier }]),
 );
+
+/**
+ * Written now, not at the end.
+ *
+ * The record used to be the last thing this script did, so a proxy that deployed and an
+ * `enableModule` that then failed left the address on chain and nowhere else — and every
+ * re-run hit the factory's CREATE2 collision, which reports `TakenAddress(0)` and cannot
+ * say where the proxy is. A deployment that exists and is not written down is the one
+ * state this file is here to prevent.
+ */
+writeDeployment({
+  network: network.name,
+  chainId: network.chainId,
+  rolesModifier,
+  ...(block === null ? {} : { rolesDeployedBlock: Number(block) }),
+  updatedAt: new Date().toISOString(),
+});
+
 await enableModule(network, safe, cast.signingOwners, rolesModifier);
 await assignRole(
   network,
@@ -57,11 +78,22 @@ const member = await isRoleMember(
   roleKey,
 );
 
+/**
+ * Where `roles:diff` starts replaying.
+ *
+ * `null` when this run found a proxy that was already there rather than deploying one —
+ * there is no receipt to read a block from. Keeping whatever the record already holds is
+ * right in that case; losing it would make every later event scan start at block zero,
+ * which is how a public RPC's range cap is discovered the hard way.
+ */
+const deployedBlock =
+  block !== null ? Number(block) : (deployment.rolesDeployedBlock ?? undefined);
+
 writeDeployment({
   network: network.name,
   chainId: network.chainId,
   rolesModifier,
-  rolesDeployedBlock: Number(block),
+  ...(deployedBlock === undefined ? {} : { rolesDeployedBlock: deployedBlock }),
   roleKey,
   agentSigner: cast.agent.address,
   updatedAt: new Date().toISOString(),

@@ -15,7 +15,10 @@ dependencies = [
 remit = "remit_bridge.cli:main"
 
 [dependency-groups]
-dev = ["ruff==0.15.1"]
+dev = [
+    "pytest>=9.1.1",
+    "ruff==0.15.1",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -40,3 +43,6 @@ select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "T20", "RET", "SIM", "ARG", 
 # PRD.md KH-4 says the ambiguity case raises `ReceiptUnresolvable` — and matching the
 # document a reviewer is reading is worth more than the suffix convention.
 "src/remit_bridge/errors.py" = ["N818"]
+# Same reason: `LockTimeout` reads as what it is at the call site, and the suffix would
+# make every `except LockTimeoutError` line longer without making one of them clearer.
+"src/remit_bridge/lock.py" = ["N818"]

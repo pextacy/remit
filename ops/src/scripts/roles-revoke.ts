@@ -15,7 +15,7 @@
  */
 
 import { rolesAbi } from "@remit/core";
-import { encodeFunctionData, getAddress, toFunctionSelector } from "viem";
+import { encodeFunctionData, getAddress, parseAbiItem, toFunctionSelector } from "viem";
 import { castFor } from "../lib/actors.js";
 import { networkFrom, option, parseArgs } from "../lib/args.js";
 import { requireDeployment, requireField } from "../lib/deployment.js";
@@ -42,6 +42,20 @@ if (signature !== undefined) {
     option(args, "on") ??
       fail("--function needs --on 0x… — a selector is only meaningful on a contract"),
   );
+  // Parsed, not merely hashed. `toFunctionSelector` will happily take `foo(bar)` — it is
+  // a keccak of a string — and hand back a selector that matches no function on the
+  // target. `revokeFunction` then succeeds, the operator is told the thing is revoked,
+  // and the function they meant to stop is still callable. `parseAbiItem` is what
+  // actually knows `uint7` is not a type.
+  try {
+    parseAbiItem(`function ${signature}`);
+  } catch {
+    fail(
+      `--function "${signature}" is not a function signature. Nothing was revoked: a ` +
+        "selector taken from a string that is not a signature revokes nothing and says " +
+        "it did.",
+    );
+  }
   const selector = toFunctionSelector(signature);
 
   say(`revoking  ${signature} (${selector}) on ${target}`);

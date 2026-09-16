@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @remit/core build && next dev --turbopack --port 3737",
+    "dev": "pnpm --filter @remit/core build && next dev --turbopack --hostname 127.0.0.1 --port 3737",
     "build": "pnpm --filter @remit/core build && next build",
-    "start": "next start --port 3737",
+    "start": "next start --hostname 127.0.0.1 --port 3737",
     "type-check": "pnpm --filter @remit/core build && tsc -p tsconfig.json"
   },
   "dependencies": {
@@ -14,7 +14,8 @@
     "next": "16.3.5",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "viem": "2.56.5"
+    "viem": "2.56.5",
+    "zod": "4.6.4"
   },
   "devDependencies": {
     "@types/node": "26.5.1",

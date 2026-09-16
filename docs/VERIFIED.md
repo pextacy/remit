@@ -100,6 +100,29 @@ Verified against the upstream repository at a pinned commit, not against the liv
 | Contribution policy | `ISSUES.md`: anything that changes behaviour needs an issue **accepted by a maintainer** before the pull request. Reference it as `Closes #N` |
 | Plugin layout | `plugins/{name}/{index.ts,icon.tsx,credentials.ts,test.ts,steps/*.ts}`; step files carry `"use step"`, export only the step function plus `_integrationType` and types, share logic via `*-core.ts`, use `fetch` rather than Node-only SDKs; `pnpm create-plugin` scaffolds, `pnpm discover-plugins` registers |
 
+### First contact with the live service
+
+Until 2026-09-15 every row above was read from the source at a pinned commit and nothing had
+been sent to `app.keeperhub.com` — OQ-1. An account now exists, and an API key with the
+read and write scopes was issued from the organization settings.
+
+What has been observed, and only this:
+
+| Probe | Result |
+|---|---|
+| `GET /api/execute/{made-up uuid}/status`, `Authorization: Bearer kh_…` | HTTP **404**, body `{"error": "Execution not found"}` |
+
+A 404 rather than a 401 or a 403 is the finding. The key authenticates, and it carries the
+`mcp:read` the status route requires — which OQ-1 item 5 listed as unknown, because the
+source reads both an API key and an OAuth token and does not say which a `kh_` key
+satisfies. It was asked with `KeeperHubClient` itself rather than with `curl`, so the code
+path that will resolve a real `transactionHash` is the one that got the answer.
+
+Still unobserved, and deliberately not probed by writing: the execute routes, whether
+`POST /api/workflow/{id}/execute` accepts an API key or insists on `mcp:write` over
+OAuth, and what a real execution's response actually carries. Those need a submission, and
+a submission moves money.
+
 ## 6. Almanak SDK
 
 Installed at the pinned version and read from the installed source, per CLAUDE.md §8.
@@ -147,6 +170,30 @@ Read off a local Anvil fork of Base Sepolia on 2026-09-14, by
 | A stranger calling `execTransactionWithRole` | `NotAuthorized(address)` — the `moduleOnly` guard, before any role check |
 | The agent after `assignRoles(..., false)` | `NoMembership()` |
 | Membership, read back | Roles 2.1.0 exposes **no getter** for the members mapping. It is observed by simulating a call and reading the error: `NotAuthorized` or `NoMembership` means no, anything else means yes. `isModuleEnabled` is not a substitute — revoking a role does not disable the module |
+
+### `revokeTarget` does not clear what it looks like it clears
+
+Observed on a fork of Base Sepolia on 2026-09-15, against the deployed 2.1.0 mastercopy.
+
+`revokeTarget(roleKey, target)` writes `TargetAddress(Clearance.None, …)` and nothing
+else. The per-`(target, selector)` scope configs stay in storage, so `scopeTarget` on the
+same address brings every previously scoped function back — with no `ScopeFunction`
+between them:
+
+| Step | `USDC.transfer` under the role |
+|---|---|
+| before anything | refused — never scoped |
+| after `scopeFunction(transfer)` | **allowed** |
+| after `revokeTarget(USDC)` | refused — `TargetAddressNotAllowed` |
+| after `scopeTarget(USDC)`, nothing re-scoped | **allowed** again |
+
+This matters because the role is read back by replaying events (§12): there is no getter.
+The replay cleared its function map on `RevokeTarget`, so it reported zero functions for a
+target the chain would let the agent call — and `roles:diff` answered "no difference" while
+the agent could move USDC out of the Safe to any address. The replay now keeps what the
+contract keeps, and `packages/remit-core/tests/hardening.test.ts` pins the rule.
+
+`revokeFunction` *does* clear the scope config, and the replay deletes it to match.
 
 Two traps worth writing down, both cost time on 2026-09-14:
 
@@ -308,8 +355,16 @@ With `withdraw` revoked on chain, a withdraw intent passed **G1** and was refuse
 **G2** with `FunctionNotAllowed`, the selector `0x69328dec` in `info`. That is the
 preset-tightened-after-the-Remit case (NH-2), reached without editing anything by hand.
 
-`roles:apply` now runs the diff first and refuses to do anything when there is nothing to
-do. On mainnet it additionally refuses to apply a widening without `--yes`.
+`roles:apply` runs the diff first and sends nothing when there is nothing to do. It
+refuses a widening without `--yes` on **every** network, not only on mainnet: `anvil-base`
+is a fork of Base mainnet precisely so the mainnet path is rehearsed as it runs, and a
+flag only ever typed for real is a flag nobody has typed.
+
+It also re-reads the chain afterwards and says whether the two now agree. `encodePreset`
+only ever *adds* — `scopeTarget` and `scopeFunction`, nothing that takes anything away —
+so a role carrying a function the preset does not list still carries it after an apply.
+That case used to end with a success line and exit zero; it now prints the residue and
+exits non-zero, because "applied" and "the chain matches" are different claims.
 
 ## 13. The kill switch
 
@@ -572,7 +627,7 @@ All five screens return 200 and render live data.
 ### G3, end to end
 
 ```
-pnpm --filter ops propose --network anvil --kind approve --amount 5 --review
+pnpm --filter ops propose --network anvil --kind approve --amount 5
   G1 PASS
   G2 PASS
   G3 WAITING  b5f821a6-… — a human has to approve this in the console
@@ -591,6 +646,37 @@ And the refusal, which is the half that matters (G3-3):
 
 A decline is a terminal receipt in the same chain as everything else. A timeout is treated
 the same way: a review that times out into an approval is not a review.
+
+G3 used to need `--review` to exist at all — without it the gate was recorded as `skipped`
+and the action went to the chain, so the human gate could be removed by forgetting a flag.
+It is now on by default on both paths, and *no reviewer* is itself a refusal, taken before
+G2 where it costs nothing:
+
+```
+pnpm --filter ops propose --network anvil --kind supply --amount 2 --no-review
+  G3 SKIPPED  nobody is watching, and the caller said to proceed anyway
+
+# and with nothing configured at all, from a caller that did not ask to proceed:
+  G3 REFUSED  this action needs a person and there is no review queue
+     G1 pass · G2 skipped · G3 declined · G3_NO_REVIEWER
+```
+
+The bridge holds the same queue. A strategy's action over the threshold stops in
+`remit serve` and is refused by silence, with a `declined_g3` receipt — verified against a
+fork on 2026-09-14, and asserted by the `gates` job in CI.
+
+A review takes as long as a person takes, so the envelope is checked *again* at the moment
+the action would happen. A Remit that lapses while somebody is deciding is authority the
+operator had already withdrawn:
+
+```
+  G1 PASS · G2 PASS · G3 APPROVED operator
+  G1 REFUSED  REMIT_EXPIRED — the envelope was re-checked after the review
+  receipt 0012-rejected_g1.json → outcome: rejected_g1, submission: none
+```
+
+Observed on 2026-09-14 against a fork, with a Remit issued to expire twenty-five seconds
+after the item was queued.
 
 Three properties of the console worth stating, because they are design decisions rather
 than omissions:

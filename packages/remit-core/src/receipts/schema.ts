@@ -12,6 +12,7 @@
  * worked is a log that has been edited.
  */
 import { z } from "zod";
+import { canonicalJson } from "../canonical/json.js";
 import { intentSchema } from "../schema/intent.js";
 import {
   addressSchema,
@@ -19,6 +20,76 @@ import {
   chainIdSchema,
   unixSecondsSchema,
 } from "../schema/primitives.js";
+
+/**
+ * What was proposed, when what was proposed was not an intent at all.
+ *
+ * `INTENT_MALFORMED` is the refusal a poisoned strategy earns most often — an extra
+ * `data` field, a float amount, an asset named by address — and it is refused *before*
+ * the intent schema admits anything. A receipt whose `intent` field only accepted valid
+ * intents could therefore not record the refusal it most needs to: sealing one threw,
+ * and the attempt left no trace at all, which is the one outcome PRD.md RC-1 forbids.
+ *
+ * So the field records it verbatim instead, under a kind that cannot be mistaken for a
+ * proposal anybody could have executed. It is a string in a record, never a document
+ * anything compiles: a receipt carrying this always has `action: null` and an outcome of
+ * `rejected_g1`.
+ */
+export const unparseableIntentSchema = z
+  .object({
+    kind: z.literal("unparseable"),
+    /** Canonical bytes of what the strategy sent, truncated. Evidence, not input. */
+    raw: z.string().min(1).max(1024),
+  })
+  .strict();
+
+export type UnparseableIntent = z.infer<typeof unparseableIntentSchema>;
+
+/**
+ * Coerce a value into something the canonical serialiser will accept.
+ *
+ * The canonicaliser deliberately refuses floats, bigints and `undefined` inside arrays,
+ * because each one is a silently different document elsewhere. Those are exactly the
+ * shapes this field exists to record, so they are rendered as their own text first —
+ * `5.5` becomes `"5.5"` — and what comes out is still one byte sequence per input.
+ */
+function renderable(value: unknown, depth = 0): unknown {
+  if (depth > 8) return "…";
+  if (value === null) return null;
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) ? value : String(value);
+  }
+  if (typeof value === "string" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.map((item) => renderable(item, depth + 1));
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        renderable(item, depth + 1),
+      ]),
+    );
+  }
+  return String(value);
+}
+
+/** Render whatever was proposed as the evidence field above. Never throws. */
+export function unparseableIntent(value: unknown): UnparseableIntent {
+  let raw: string;
+  try {
+    raw = canonicalJson(renderable(value));
+  } catch {
+    raw = String(value);
+  }
+  if (raw === "") raw = "(empty)";
+  return {
+    kind: "unparseable",
+    raw: raw.length > 1024 ? `${raw.slice(0, 1021)}...` : raw,
+  };
+}
+
+/** What a receipt may record as the thing that was proposed. */
+export const receiptIntentSchema = z.union([intentSchema, unparseableIntentSchema]);
 
 /** The gate that decided, and what it decided. */
 export const gateOutcomeSchema = z
@@ -96,7 +167,7 @@ export const receiptBodySchema = z
     agent: addressSchema,
 
     // ---- what was proposed, and what became of it ------------------------
-    intent: intentSchema,
+    intent: receiptIntentSchema,
     /**
      * The compiled call — target, function, named parameters.
      *

@@ -35,6 +35,7 @@ import { requireDeployment, requireField } from "../lib/deployment.js";
 import {
   executeThroughRole,
   preflight,
+  preflightWasUnanswered,
   type RoleAction,
   refusalIsOpaque,
 } from "../lib/exec-role.js";
@@ -101,7 +102,14 @@ const check = await preflight(
 if (check.ok) {
   say("preflight PASS — the Roles Modifier would allow this call");
 } else {
-  say(`preflight REFUSED — ${check.reason}`);
+  // "The modifier refused" and "the node did not answer" are different facts, and the
+  // second is not a reading of anything. Calling both REFUSED told an operator the preset
+  // had spoken when nothing had.
+  say(
+    preflightWasUnanswered(check)
+      ? `preflight UNKNOWN — ${check.reason}`
+      : `preflight REFUSED — ${check.reason}`,
+  );
   if (refusalIsOpaque(check)) {
     fail(
       "preflight returned an undecodable revert — the ABI no longer matches the chain",

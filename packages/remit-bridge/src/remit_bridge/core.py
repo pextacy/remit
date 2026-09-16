@@ -100,19 +100,24 @@ def check_envelope(
     intent: dict[str, Any],
     now: int,
     ledger: list[dict[str, Any]],
+    seen_strategy_hash: str | None = None,
 ) -> dict[str, Any]:
     """G1. Returns the decision, or raises `EnvelopeRefused` with the typed error."""
-    answer, _code = invoke(
-        "envelope",
-        {
-            "remit": remit,
-            "limits": limits,
-            "chainId": chain_id,
-            "intent": intent,
-            "now": now,
-            "ledger": ledger,
-        },
-    )
+    payload: dict[str, Any] = {
+        "remit": remit,
+        "limits": limits,
+        "chainId": chain_id,
+        "intent": intent,
+        "now": now,
+        "ledger": ledger,
+    }
+    # G3-5. Omitted rather than sent as null when there is nothing to compare against:
+    # a chain with no executed receipt has no previous version, which is not the same
+    # fact as a version that matches.
+    if seen_strategy_hash:
+        payload["seenStrategyHash"] = seen_strategy_hash
+
+    answer, _code = invoke("envelope", payload)
     if not answer.get("ok"):
         error = answer.get("error", {})
         raise EnvelopeRefused(error)
@@ -123,6 +128,7 @@ def check_envelope(
 def preflight(
     *,
     rpc_url: str,
+    chain_id: int,
     roles_modifier: str,
     role_key: str,
     agent: str,
@@ -139,6 +145,10 @@ def preflight(
         "preflight",
         {
             "rpcUrl": rpc_url,
+            # The chain the Remit is for. G2's answer is only about the chain G2 asked,
+            # and an RPC pointed at the wrong network answers confidently about a Roles
+            # instance that is not there — which reads as a clean refusal.
+            "chainId": chain_id,
             "rolesModifier": roles_modifier,
             "roleKey": role_key,
             "agent": agent,
@@ -182,6 +192,30 @@ def tx_status(*, rpc_url: str, tx_hash: str) -> dict[str, Any]:
     """What the chain says about a transaction. A read, with no rules in it."""
     answer, _code = invoke("tx:status", {"rpcUrl": rpc_url, "txHash": tx_hash})
     return answer
+
+
+def seen_strategy_hash(directory: Path) -> str | None:
+    """G3-5. The `strategyHash` this agent last actually executed under, or ``None``.
+
+    Handed to G1, which holds the next action for review when it differs from the one the
+    Remit binds: the strategy has changed version since anybody watched it act, and a new
+    version's first transaction is the one worth looking at — exactly the one a notional
+    threshold waves through.
+
+    The ops pipeline computed this and the bridge did not, so the rule existed on the
+    hand-run path and was missing from the path a strategy actually runs through.
+
+    A chain that cannot be read answers ``None`` rather than raising. This is a *widening*
+    of what needs review only in the sense that it stops being narrowed: without an answer
+    G1 applies the notional threshold alone, which is what it did before this existed. It
+    is not a reason to refuse an action the operator's caps already allow.
+    """
+    try:
+        answer, _code = invoke("receipt:seen", {"dir": str(directory)})
+    except CoreInvocationError:
+        return None
+    seen = answer.get("seenStrategyHash")
+    return str(seen) if seen else None
 
 
 def append_receipt(directory: Path, body: dict[str, Any]) -> dict[str, Any]:

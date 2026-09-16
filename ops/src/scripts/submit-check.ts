@@ -62,10 +62,21 @@ function git(args: readonly string[]): string {
 // ---------------------------------------------------------------------------
 
 const tracked = git(["ls-files"]).split("\n");
+/**
+ * Any `.env`, at any depth — not only the one at the root.
+ *
+ * The console reads a `.env` of its own in `packages/remit-console/`, because Next loads
+ * one from the directory it runs in rather than from the repository root. A second place
+ * a secret can live is a second place it can be committed from, and `tracked.includes(".env")`
+ * saw only the first.
+ */
+const trackedEnv = tracked.filter(
+  (path) => /(^|\/)\.env($|\.)/.test(path) && !/(^|\/)\.env\.example$/.test(path),
+);
 check(
-  tracked.includes(".env") ? "blocked" : "ok",
+  trackedEnv.length === 0 ? "ok" : "blocked",
   "no .env tracked",
-  tracked.includes(".env") ? ".env is in the index" : "clean",
+  trackedEnv.length === 0 ? "clean" : `${trackedEnv.join(", ")} in the index`,
 );
 
 /**
@@ -105,20 +116,61 @@ check(
 );
 
 /**
- * The four quality gates, actually run.
+ * The quality gates, actually run.
  *
- * CLAUDE.md §7 says a task is done when these pass, and Friday morning is exactly when
- * somebody wants to know without going to look. Ten seconds is worth it.
+ * docs/CLAUDE.md §7 defines done as
+ * `pnpm -r type-check && pnpm -r lint && pnpm -r test` passing, **and** `pytest` passing.
+ * Friday morning is exactly when somebody wants to know that without going to look.
+ *
+ * It said "the four quality gates" and ran three — type-check and the two linters. The
+ * two it left out were the tests, which are the only ones that would notice a gate that
+ * had stopped refusing: a G1 with its recipient check deleted type-checks, lints, and
+ * passes both linters. So this could report a submission ready with the product broken,
+ * which is the one answer it exists to get right.
+ *
+ * The extra seconds are worth it. `maxBuffer` is raised because a test run prints a line
+ * per test, and a gate that "failed" because its own output was too long would be a
+ * false alarm on the morning this is read.
  */
 function gate(label: string, command: string, args: readonly string[], cwd = REPO): void {
   try {
-    execFileSync(command, args, { cwd, stdio: "pipe", encoding: "utf8" });
+    execFileSync(command, args, {
+      cwd,
+      stdio: "pipe",
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+    });
     check("ok", label, "passes");
   } catch (error) {
     const output = String((error as { stdout?: string }).stdout ?? error);
-    const firstError = output.split("\n").find((line) => /error|Error|FAIL/.test(line));
-    check("blocked", label, firstError?.trim().slice(0, 100) ?? "failed");
+    check("blocked", label, firstFailure(output));
   }
+}
+
+/**
+ * The line worth showing out of a failed gate's output.
+ *
+ * `find(/error|Error|FAIL/)` matched the first line containing the word, which in a test
+ * run is a *passing* test whose name happens to contain it — "✔ the error names the path
+ * that failed". So the one line an operator reads on Friday morning pointed at something
+ * that had worked.
+ *
+ * Failures are marked, and the markers differ per tool: TAP writes `not ok`, node:test
+ * writes `✖`, tsc writes `error TS`, biome writes `×`. Pass markers are stripped first,
+ * because they are what the word-match kept tripping over.
+ */
+function firstFailure(output: string): string {
+  const lines = output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !/^(✔|ok\s|✓)/.test(line) && !/\s✔\s/.test(line));
+
+  const marked = lines.find((line) => /(^not ok\b|✖|×|error TS|\bFAIL\b)/.test(line));
+  if (marked !== undefined) return marked.slice(0, 120);
+
+  // Nothing marked itself. The first line is more use than "failed" — it is usually the
+  // command's own first word about what went wrong.
+  return lines[0]?.slice(0, 120) ?? "failed, with no output";
 }
 
 gate("type-check", "pnpm", ["-r", "--if-present", "type-check"]);
@@ -127,6 +179,15 @@ gate(
   "python lint",
   "uv",
   ["run", "ruff", "check", "."],
+  join(REPO, "packages", "remit-bridge"),
+);
+// The gates, the hashes and the receipt chain, as unit tests. No chain and no clock, so
+// they cost seconds — and they are what distinguishes "it compiles" from "it refuses".
+gate("tests", "pnpm", ["-r", "--if-present", "test"]);
+gate(
+  "python tests",
+  "uv",
+  ["run", "pytest", "tests", "-q"],
   join(REPO, "packages", "remit-bridge"),
 );
 
@@ -219,17 +280,42 @@ const chains = existsSync(receiptsRoot)
       )
   : [];
 
+/** Does git ignore this path? Asked rather than assumed from the directory's name. */
+function isIgnored(path: string): boolean {
+  try {
+    execFileSync("git", ["check-ignore", "-q", path], { cwd: REPO, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const committedChains = chains.filter((name) =>
   tracked.some((file) => file.startsWith(`receipts/${name}/`)),
 );
 
 if (committedChains.length === 0) {
+  /**
+   * "Not in the index" and "ignored" are different problems with different fixes.
+   *
+   * This said `gitignored` for every uncommitted chain, which sends an operator to
+   * `.gitignore` when the answer is `git add`. The fork chains really are ignored — they
+   * are regenerated on every run and are not evidence — but a real network's chain is
+   * not, and the first time one existed this told them to go and look at the wrong file.
+   */
+  const ignored = chains.filter((name) => isIgnored(`receipts/${name}`));
+  const stageable = chains.filter((name) => !isIgnored(`receipts/${name}`));
+
   check(
     "blocked",
     "a committed receipt chain",
     chains.length === 0
       ? "no receipts at all"
-      : `${chains.join(", ")} exist but are gitignored — a rehearsal chain is not evidence`,
+      : stageable.length > 0
+        ? `${stageable.join(", ")} is on disk and not committed — ` +
+          `\`git add receipts/${stageable[0]}\`. A chain nobody can clone is not evidence`
+        : `${ignored.join(", ")} exist but are gitignored — a rehearsal chain is ` +
+          "not evidence",
   );
 } else {
   for (const name of committedChains) {

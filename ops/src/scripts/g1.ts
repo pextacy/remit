@@ -5,8 +5,16 @@
  *
  * Not a test suite — it is the gate itself, driven over a table of intents, printing the
  * typed error each one produces. It exists because "the envelope check rejects bad
- * intents" is a claim, and a reviewer reading fourteen named refusals with the failing
- * field in each is evidence. It is also the material for the injection demo in P8.
+ * intents" is a claim, and a reviewer reading each named refusal with the failing field
+ * beside it is evidence. It is also the material for the injection demo in P8.
+ *
+ * It covers thirteen of the fourteen codes in `EnvelopeErrorCode`. The fourteenth,
+ * `OUT_OF_REMIT_ASSET`, cannot fire in this build and is not faked here: an intent's
+ * asset is `z.literal("USDC")` and `allowedAssets` is a non-empty array of the same
+ * literal, so the list always contains the only asset an intent can name. The check is
+ * kept because it is the line that starts refusing the day a second asset is added, and
+ * a table that pretended to exercise it would be the one case in this file that proved
+ * nothing.
  *
  * Nothing here touches a network. G1 is a pure function of (remit, limits, intent, now,
  * ledger), which is the property that lets the same call be re-run over a committed

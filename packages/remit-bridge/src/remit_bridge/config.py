@@ -104,6 +104,38 @@ def receipts_dir(network: str) -> Path:
     return RECEIPTS_ROOT / network
 
 
+def env_rpc_url(network: str) -> str:
+    """The RPC the gates read the chain through.
+
+    Here rather than in the Almanak adapter: it is a lookup in the environment with no
+    gateway, no gRPC and no SDK in it, and every verb needs it — including the ones that
+    should not have to import a strategy runtime to find out which node to ask.
+    """
+    if network == "anvil":
+        return _env_url("ANVIL_RPC_URL", "http://127.0.0.1:8545")
+    if network == "anvil-base":
+        return _env_url("ANVIL_BASE_RPC_URL", "http://127.0.0.1:8547")
+    if network == "base-sepolia":
+        return _env_url("BASE_SEPOLIA_RPC_URL", "https://sepolia.base.org")
+    url = os.environ.get("BASE_RPC_URL", "").strip()
+    if not url:
+        raise ConfigError("BASE_RPC_URL is required on mainnet")
+    return url
+
+
+def _env_url(name: str, fallback: str) -> str:
+    """An environment variable set to nothing is not a value.
+
+    ``os.environ.get(name, default)`` returns the default only when the key is *absent*,
+    and `.env.example` ships every optional RPC as ``NAME=`` with nothing after it —
+    which is how an operator is told to leave one unset. Sourcing that handed an empty
+    URL to the core's chain client, and the gate reported the chain as unreachable
+    instead of falling back to the endpoint this build already knows.
+    """
+    value = os.environ.get(name, "").strip()
+    return value or fallback
+
+
 def require_env(name: str, *, hint: str = "") -> str:
     value = os.environ.get(name, "")
     if not value:

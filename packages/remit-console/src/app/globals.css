@@ -1,249 +1,1217 @@
-/*
- * An operator console at 02:00, not a landing page.
+/**
+ * The console's whole visual system.
  *
- * One column, high contrast, monospace for anything a person might have to compare by
- * eye — a hash that is hard to read is a hash nobody checks.
+ * One idea: an action is either inside the remit or outside it, and the page draws that
+ * boundary once — a single ink hairline at two thirds of the content width. Every amount
+ * is a horizontal measure against it. Permitted amounts stop short and are set quiet;
+ * refused ones are set in full ink; an amount that actually exceeds the cap pierces the
+ * line and is cut off at the container edge.
+ *
+ * Three values and no hue. That is not austerity for its own sake: with nothing coloured,
+ * full ink means one thing everywhere on the screen — this is the part that was refused —
+ * and an operator can find it without reading. The single colour event in the product is
+ * inversion, and it is reserved for the two states that stop everything: a receipt chain
+ * that does not verify, and a pulled kill switch.
  */
+
 :root {
-  --bg: #0d1117;
-  --panel: #161b22;
-  --line: #30363d;
-  --text: #e6edf3;
-  --muted: #8b949e;
-  --ok: #3fb950;
-  --no: #f85149;
-  --warn: #d29922;
-  --link: #58a6ff;
+  /* The triad. Nothing else has a hue. */
+  --paper: #e7e9e6;
+  --quiet: #676d69;
+  --ink: #0c0f0d;
+
+  /* Derived, for hairlines and inert track. Still the triad, just thinner. */
+  --rule: color-mix(in srgb, var(--ink) 18%, transparent);
+  --rule-strong: color-mix(in srgb, var(--ink) 45%, transparent);
+  --track: color-mix(in srgb, var(--ink) 7%, transparent);
+
+  /* The remit line sits here, and every measure is scaled against it. */
+  --remit-line: 66.666%;
+
+  --spine: 1080px;
+  --gutter: 32px;
+  --band: 56px;
+
+  --step: 8px;
+
+  /**
+   * Martian Mono, narrowed.
+   *
+   * It is a wide monospace by default, and every hash, address and figure on these
+   * screens is set in it — at full width a truncated hash costs half a column. Set here
+   * and inherited: the text face has no width axis, so this reaches only the face it is
+   * meant for.
+   */
+  font-variation-settings: "wdth" 87.5;
+}
+
+/**
+ * Inversion. The page swaps ground and ink and stays that way.
+ *
+ * No localised alert exists in this design — nothing is outlined in red, because nothing
+ * is red. A state that stops the system inverts the surface it belongs to, which is
+ * impossible to miss and impossible to mistake for decoration.
+ */
+[data-inverted] {
+  --paper: #0c0f0d;
+  --ink: #e7e9e6;
+  --quiet: color-mix(in srgb, #e7e9e6 45%, transparent);
+  --rule: color-mix(in srgb, #e7e9e6 22%, transparent);
+  --rule-strong: color-mix(in srgb, #e7e9e6 50%, transparent);
+  --track: color-mix(in srgb, #e7e9e6 12%, transparent);
+
+  /*
+   * Redefining the values is not enough — something has to paint them.
+   *
+   * The ground is laid down by a fixed layer behind everything rather than by widening
+   * this block to the viewport: any `100vw` arithmetic is off by a scrollbar on some
+   * machine and by a rounding error on the rest, and a strip of the wrong colour down one
+   * edge would say the page is only partly in this state.
+   *
+   * The bands keep their own opaque light ground and sit above it, so the nav stays
+   * readable while everything the screen is actually about turns over.
+   */
+  position: relative;
+  color: var(--ink);
+  min-height: calc(100vh - var(--band) * 2);
+}
+
+[data-inverted]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: var(--paper);
+  z-index: -1;
+}
+
+/*
+ * The line again, drawn inside the inverted context so it takes that context's ink. The
+ * layout's own line is still there and is now dark on dark, which is to say invisible —
+ * so there is one line on the screen, and it is the readable one.
+ */
+[data-inverted]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 66.666%;
+  width: 1px;
+  background: var(--ink);
+  pointer-events: none;
 }
 
 * {
   box-sizing: border-box;
+  /* Geometry is orthogonal. No pills, no rounded anything. */
+  border-radius: 0;
 }
 
-/* Declared before `nav a` so specificity climbs through the file rather than falling. */
-a {
-  color: var(--link);
+html {
+  background: var(--paper);
 }
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font:
-    15px / 1.55 ui-sans-serif,
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-text), ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
 }
 
-header {
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* Element defaults live here, before any component may need to be more specific. */
+a {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule-strong);
+}
+
+a:hover {
+  border-bottom-color: var(--ink);
+}
+
+/* ---- the bands ---------------------------------------------------------- */
+
+.band {
+  position: relative;
+  z-index: 2;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.band-inner {
+  max-width: var(--spine);
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+  height: var(--band);
   display: flex;
   align-items: center;
   gap: 24px;
-  padding: 14px 28px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
 }
 
-.brand {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-.brand strong {
-  font-size: 17px;
-  letter-spacing: 0.02em;
-}
-.tagline {
-  color: var(--muted);
-  font-size: 13px;
+.wordmark {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
 }
 
-nav {
-  display: flex;
-  gap: 18px;
+.creed {
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--quiet);
+}
+
+.band nav {
   margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  align-items: center;
+  height: 100%;
+  min-width: 0;
 }
-nav a {
-  color: var(--muted);
+
+.band nav a {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--quiet);
   text-decoration: none;
-  font-size: 14px;
+  border-bottom: 2px solid transparent;
 }
-nav a:hover {
-  color: var(--text);
+
+.band nav a:hover {
+  color: var(--ink);
+}
+
+.band nav a[aria-current="page"] {
+  color: var(--ink);
+  font-weight: 700;
+  border-bottom-color: var(--ink);
 }
 
 .network {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  color: var(--warn);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 3px 10px;
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--quiet);
+  padding-left: 20px;
+  border-left: 1px solid var(--rule);
 }
+
+/* ---- the spine, and the line ------------------------------------------- */
 
 main {
-  max-width: 1080px;
+  min-height: calc(100vh - var(--band) * 2);
+}
+
+.spine {
+  position: relative;
+  max-width: var(--spine);
   margin: 0 auto;
-  padding: 28px;
+  padding: 0 var(--gutter) 96px;
 }
 
+/**
+ * The remit line. One hairline, full height, at the cap.
+ *
+ * Drawn behind the content so a measure that exceeds the cap crosses it rather than
+ * stopping at it — which is the whole point of having drawn it.
+ */
+.remit-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--gutter) + (100% - var(--gutter) * 2) * 0.66666);
+  width: 1px;
+  background: var(--ink);
+  z-index: 0;
+  pointer-events: none;
+}
+
+.spine > *:not(.remit-line) {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---- type -------------------------------------------------------------- */
+
+/*
+ * Headings carry real values — an action's description ends in a 42-character address,
+ * and a word that cannot break is a page that scrolls sideways.
+ */
 h1 {
-  font-size: 20px;
-  margin: 0 0 6px;
+  font-size: 56px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-weight: 400;
+  margin: 0 0 16px;
+  overflow-wrap: anywhere;
 }
+
 h2 {
-  font-size: 15px;
-  margin: 28px 0 10px;
-  color: var(--muted);
-  font-weight: 600;
-}
-p.lede {
-  color: var(--muted);
-  margin: 0 0 22px;
+  font-size: 20px;
+  line-height: 24px;
+  letter-spacing: -0.02em;
+  font-weight: 400;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
-.panel {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  padding: 18px 20px;
-  margin-bottom: 16px;
-}
-
-.grid {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-}
-
-.stat {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 14px 16px;
-  background: var(--panel);
-}
-.stat .label {
-  color: var(--muted);
-  font-size: 12px;
+/* The whole hierarchy is this gap: 56px against 11px. Nothing sits between them. */
+.eyebrow {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.25em;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  color: var(--quiet);
+  margin-bottom: 10px;
 }
-.stat .value {
-  font-size: 24px;
-  margin-top: 4px;
-  font-variant-numeric: tabular-nums;
+
+.label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--quiet);
 }
-.stat .sub {
-  color: var(--muted);
+
+.lede {
+  font-family: var(--font-data), ui-monospace, monospace;
   font-size: 12px;
+  line-height: 18px;
+  color: var(--quiet);
+  max-width: 46em;
+  margin: 0;
+}
+
+p {
+  max-width: 62ch;
+}
+
+/* Element selectors first, then classes, so specificity only ever ascends. */
+code,
+pre {
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.02em;
+}
+
+pre {
+  overflow-x: auto;
+  padding: 12px 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  color: var(--quiet);
+}
+
+/* Data, wherever it appears: hashes, addresses, amounts, timestamps. */
+.mono {
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.02em;
+}
+
+.quiet {
+  color: var(--quiet);
+}
+
+/*
+ * A hash inside a label keeps its own case. `text-transform` is a rendering of a word;
+ * applied to a value it shows the operator something that is not what is on disk.
+ */
+.label code,
+.label .mono,
+.terms dt code {
+  text-transform: none;
+  letter-spacing: -0.02em;
+}
+
+/* ---- sections ---------------------------------------------------------- */
+
+.head {
+  padding: 72px 0 40px;
+  border-bottom: 1px solid var(--rule);
+}
+
+section {
+  padding: 40px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+section:last-of-type {
+  border-bottom: 0;
+}
+
+/* Even the headings agree with the line: the title inside it, the caption beyond. */
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  margin-bottom: 24px;
+}
+
+.section-head > :first-child {
+  flex: 0 0 66.666%;
+  min-width: 0;
+}
+
+.section-head > :last-child:not(:first-child) {
+  flex: 0 0 33.333%;
+  min-width: 0;
+  text-align: right;
+  padding-left: 16px;
+}
+
+/* ---- the measure ------------------------------------------------------- */
+
+/**
+ * An amount, drawn against the cap.
+ *
+ * The length is the truth: width is `amount / cap` scaled so that the cap lands exactly on
+ * the remit line. So a bar that crosses the line is an amount that actually exceeded the
+ * cap — not a decoration applied to every refusal. Most refusals are about *where* value
+ * would land rather than how much, and those are marked in ink without crossing anything.
+ * A bar whose length lied about the number would make this whole page untrustworthy.
+ */
+.measure {
+  position: relative;
+  height: 22px;
+  background: var(--track);
+  margin: 8px 0 6px;
+}
+
+.measure-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--measure, 0%);
+  max-width: 100%;
+  background: var(--quiet);
+}
+
+.measure[data-refused="true"] .measure-bar {
+  background: var(--ink);
+}
+
+/* The cap tick, for measures that are not full-width sections. */
+.measure-cap {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  left: 66.666%;
+  width: 1px;
+  background: var(--ink);
+}
+
+/*
+ * The review threshold, on the same track as the cap it sits inside. Labelled where it
+ * falls, because "above 1 USD stops for a person" is a place on this line rather than a
+ * separate fact about it.
+ */
+.measure-mark {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  width: 1px;
+  background: var(--ink);
+}
+
+.measure-mark span {
+  position: absolute;
+  top: -16px;
+  left: 4px;
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--quiet);
+}
+
+/* ---- caps -------------------------------------------------------------- */
+
+.cap + .cap {
+  margin-top: 44px;
+}
+
+.cap .label {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.cap-value {
+  margin: 0 0 22px;
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 48px;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  font-variant-numeric: tabular-nums lining-nums;
+  max-width: none;
+}
+
+.cap-value em {
+  font-style: normal;
+  font-size: 16px;
+  letter-spacing: 0;
+  color: var(--quiet);
+  margin-left: 12px;
+}
+
+.measure-foot {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  overflow-wrap: anywhere;
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--quiet);
+}
+
+.measure-foot strong {
+  font-weight: 400;
+  color: var(--ink);
+}
+
+/* ---- gate ticks -------------------------------------------------------- */
+
+/**
+ * Four slots, always in the same order and the same place, so a refusal at G2 sits where
+ * a refusal at G2 always sits. A passed gate is a short quiet tick; a refused one is
+ * twice as tall and in full ink; a skipped one is an empty slot.
+ */
+.gates {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 24px;
+}
+
+.gate {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 14px;
+}
+
+.gate span {
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--quiet);
+}
+
+.gate i {
+  display: block;
+  width: 1px;
+  height: 8px;
+  background: var(--quiet);
+}
+
+/* Declared here, beside the tick it is a longer form of, so specificity only ascends. */
+.sequence-gate i {
+  display: block;
+  width: 1px;
+  height: 10px;
+  background: var(--quiet);
+  margin: 10px 0 8px;
+}
+
+.gate[data-outcome="refused"] span,
+.gate[data-outcome="declined"] span,
+.gate[data-outcome="reverted"] span {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.gate[data-outcome="refused"] i,
+.gate[data-outcome="declined"] i,
+.gate[data-outcome="reverted"] i {
+  height: 16px;
+  background: var(--ink);
+}
+
+.gate[data-outcome="skipped"] i {
+  height: 8px;
+  background: var(--rule);
+}
+
+/* ---- the gate sequence ------------------------------------------------- */
+
+/*
+ * Four gates written out, on the screen where the reader is one of them. The names sit
+ * in the same order and the same places as the ticks everywhere else, so the two readings
+ * of the same thing agree.
+ */
+.sequence {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  border-top: 1px solid var(--rule);
+  width: 66.666%;
+}
+
+.sequence-gate {
+  padding: 16px 16px 16px 0;
+  border-right: 1px solid var(--rule);
+  min-width: 0;
+}
+
+.sequence-gate:last-child {
+  border-right: 0;
+}
+
+.sequence-name {
+  display: block;
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--quiet);
+}
+
+.sequence-asks {
+  display: block;
+  font-size: 11px;
+  color: var(--quiet);
   margin-top: 2px;
 }
 
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-th {
-  text-align: left;
-  color: var(--muted);
-  font-weight: 600;
+.sequence-verdict {
+  display: block;
+  font-family: var(--font-data), ui-monospace, monospace;
   font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--line);
-}
-td {
-  padding: 10px;
-  border-bottom: 1px solid var(--line);
-  vertical-align: top;
-}
-tr:last-child td {
-  border-bottom: none;
+  color: var(--quiet);
 }
 
-code,
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12.5px;
+.sequence-gate[data-outcome="pass"] .sequence-name,
+.sequence-gate[data-outcome="pass"] .sequence-verdict {
+  color: var(--ink);
 }
 
-.ok {
-  color: var(--ok);
-}
-.no {
-  color: var(--no);
-}
-.warn {
-  color: var(--warn);
-}
-.muted {
-  color: var(--muted);
+.sequence-gate[data-outcome="absent"] i {
+  background: var(--rule);
 }
 
-.pill {
-  display: inline-block;
-  border-radius: 999px;
-  padding: 2px 9px;
-  font-size: 12px;
-  border: 1px solid var(--line);
-}
-.pill.ok {
-  border-color: var(--ok);
-}
-.pill.no {
-  border-color: var(--no);
-}
-.pill.warn {
-  border-color: var(--warn);
+.sequence-gate[data-outcome="refused"] i,
+.sequence-gate[data-outcome="declined"] i,
+.sequence-gate[data-outcome="reverted"] i {
+  height: 20px;
+  background: var(--ink);
 }
 
-form.actions {
+.sequence-gate[data-outcome="refused"] .sequence-name,
+.sequence-gate[data-outcome="refused"] .sequence-verdict,
+.sequence-gate[data-outcome="declined"] .sequence-name,
+.sequence-gate[data-outcome="declined"] .sequence-verdict,
+.sequence-gate[data-outcome="reverted"] .sequence-name,
+.sequence-gate[data-outcome="reverted"] .sequence-verdict {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* ---- figures ----------------------------------------------------------- */
+
+/**
+ * Three across, because three columns put a rule exactly on the remit line.
+ *
+ * The line is drawn the full height of the page, so anything laid out across it has to
+ * agree with it — a boundary that cuts through the middle of a number would make the page
+ * look like two designs fighting. Four equal columns break at 25/50/75 and collide; three
+ * break at 33.3 and 66.6, and the second one *is* the line.
+ */
+.figures {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  border-top: 1px solid var(--rule);
+}
+
+/**
+ * The four gates sit inside the remit, ending exactly on it.
+ *
+ * Four columns across the left two thirds: the last one closes on the line. The gates are
+ * what the agent is allowed to be stopped by, so they belong on the permitted side of it.
+ */
+.figures[data-inside="true"] {
+  grid-template-columns: repeat(4, 1fr);
+  width: 66.666%;
+}
+
+.figure {
+  padding: 20px 24px 20px 0;
+  border-right: 1px solid var(--rule);
+  min-width: 0;
+}
+
+.figure:last-child {
+  border-right: 0;
+  padding-right: 0;
+}
+
+.figure .label {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.figure b {
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 28px;
+  line-height: 30px;
+  letter-spacing: -0.04em;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums lining-nums;
+  display: block;
+}
+
+/* A hash in a figure is still a hash: it gets a readable size, not a headline's. */
+.figure b code {
+  font-size: 15px;
+  line-height: 30px;
+}
+
+.figure small {
+  display: block;
+  margin-top: 8px;
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--quiet);
+  overflow-wrap: anywhere;
+}
+
+.figure b {
+  overflow-wrap: anywhere;
+}
+
+.figure[data-mark="true"] b {
+  /* The one thing on the screen that must be read first. */
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 4px;
+}
+
+/* ---- records ----------------------------------------------------------- */
+
+/**
+ * One attempt, as a block rather than a table row.
+ *
+ * The measure has to be scaled to the page, because the page is where the remit line is.
+ * Inside a table cell its 66.666% would be 66.666% *of the cell*, and the bar would stop
+ * somewhere that means nothing — a length that lies is worse than no length at all. So a
+ * record is a text line laid on the grid with a full-width measure under it.
+ */
+.records {
+  border-top: 1px solid var(--rule);
+}
+
+.record {
+  padding: 14px 0 16px;
+  border-bottom: 1px solid var(--rule);
+}
+
+/*
+ * Twelve columns. The description runs to column 8, which is the line: what was proposed
+ * lives inside the remit, and the verdict on it lives outside.
+ */
+.record-line {
+  display: grid;
+  grid-template-columns: 3fr 13fr 4fr 4fr;
+  align-items: baseline;
+  gap: 0 16px;
+}
+
+.record-line > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.record-line > :nth-child(3),
+.record-line > :nth-child(4) {
+  padding-left: 16px;
+}
+
+.record-what {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.record-outcome {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.record[data-refused="true"] .record-outcome {
+  font-weight: 700;
+}
+
+/* Metadata about a record stays inside the remit; only the measure may leave it. */
+.record-meta {
   display: flex;
-  gap: 10px;
-  margin-top: 14px;
-  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  width: 66.666%;
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--quiet);
+  margin-top: 4px;
 }
+
+.columns {
+  display: grid;
+  grid-template-columns: 3fr 13fr 4fr 4fr;
+  gap: 0 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.columns > * {
+  min-width: 0;
+}
+
+.columns > :nth-child(3),
+.columns > :nth-child(4) {
+  padding-left: 16px;
+}
+
+.columns > :last-child {
+  text-align: right;
+}
+
+.num {
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums lining-nums;
+  white-space: nowrap;
+}
+
+/* ---- definition lists -------------------------------------------------- */
+
+/**
+ * Label, value, annotation — and the line falls between the last two.
+ *
+ * Three columns on the page's twelve: the label, the value out to column 8, and the gloss
+ * beyond it. So what the document *says* stays inside the remit and what we say *about*
+ * it sits outside, which is the one distinction this whole screen is built on. Only a
+ * measure is allowed to cross.
+ */
+.terms {
+  display: grid;
+  grid-template-columns: 3fr 13fr 8fr;
+  border-top: 1px solid var(--rule);
+}
+
+.terms dt,
+.terms dd {
+  padding: 12px 16px 12px 0;
+  border-bottom: 1px solid var(--rule);
+  margin: 0;
+  min-width: 0;
+}
+
+.terms dt {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--quiet);
+}
+
+.terms dd {
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  /* A list of addresses is a list. Joined with newlines, it should read as one. */
+  white-space: pre-line;
+}
+
+.terms .gloss {
+  color: var(--quiet);
+  font-family: var(--font-text), sans-serif;
+  font-size: 12px;
+  word-break: normal;
+  padding-left: 16px;
+  padding-right: 0;
+}
+
+/**
+ * Calldata is the exception: it is the one thing on the kill screen an operator copies,
+ * and cramping it into a third of the page to honour a rule would be the rule serving
+ * itself rather than the person reading.
+ */
+.terms dd[data-wide="true"] {
+  grid-column: 2 / span 2;
+  padding-right: 0;
+}
+
+/* ---- controls ---------------------------------------------------------- */
+
 input[type="text"] {
-  flex: 1;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--text);
-  padding: 8px 10px;
-  font-size: 14px;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--rule-strong);
+  padding: 6px 0;
+  color: var(--ink);
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 13px;
+  min-width: 0;
 }
+
+input[type="text"]:focus {
+  outline: none;
+  border-bottom-color: var(--ink);
+  border-bottom-width: 2px;
+  padding-bottom: 5px;
+}
+
 button {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 8px 16px;
-  font-size: 14px;
-  background: var(--bg);
-  color: var(--text);
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  padding: 11px 22px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
   cursor: pointer;
 }
-button.approve {
-  border-color: var(--ok);
-  color: var(--ok);
-}
-button.decline {
-  border-color: var(--no);
-  color: var(--no);
-}
-button:hover {
-  background: #21262d;
+
+/* Instant inversion. No easing — the interface does not ease into a decision. */
+button:hover,
+button:focus-visible {
+  background: var(--ink);
+  color: var(--paper);
+  outline: none;
 }
 
-.empty {
-  color: var(--muted);
-  padding: 26px 0;
-  text-align: center;
-}
-.gatelist {
+.controls {
   display: flex;
-  gap: 8px;
+  gap: 20px;
+  align-items: flex-end;
   flex-wrap: wrap;
+  margin-top: 28px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The note takes whatever is left, and gives it back when there is none. */
+.field-wide {
+  flex: 1 1 200px;
+}
+
+/* ---- states ------------------------------------------------------------ */
+
+.empty {
+  padding: 32px 0;
+  border-top: 1px solid var(--rule);
+  color: var(--quiet);
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 12px;
+}
+
+/**
+ * Something on disk is not what it claims to be.
+ *
+ * Inverted rather than outlined. There is no red in this design to reach for, and a block
+ * that turns the page's own values inside out is harder to ignore than one that is merely
+ * a different colour.
+ */
+.problem {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 22px 24px;
+  margin: 28px 0;
+}
+
+.problem strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.problem p,
+.problem .mono {
+  color: color-mix(in srgb, var(--paper) 70%, transparent);
+  margin: 10px 0 0;
+}
+
+.problem table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 14px;
+}
+
+.problem td {
+  padding: 8px 16px 8px 0;
+  border-top: 1px solid color-mix(in srgb, var(--paper) 25%, transparent);
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 11px;
+  vertical-align: top;
+}
+
+/* ---- the footer band --------------------------------------------------- */
+
+footer.band {
+  border-bottom: 0;
+  border-top: 1px solid var(--rule);
+}
+
+footer .band-inner {
+  justify-content: space-between;
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--quiet);
+  text-transform: uppercase;
+}
+
+/* ---- narrow ------------------------------------------------------------ */
+
+@media (max-width: 900px) {
+  :root {
+    --gutter: 20px;
+  }
+
+  h1 {
+    font-size: 36px;
+    letter-spacing: -0.03em;
+  }
+
+  /*
+   * The line becomes the right margin, so the cap does too — and the measures have to
+   * follow it. A bar drawn against a boundary that has moved is a bar that means nothing:
+   * two thirds of the page is where the cap was, not where it is.
+   */
+  .remit-line {
+    left: auto;
+    right: var(--gutter);
+  }
+
+  .measure-bar {
+    width: calc(var(--measure, 0%) * 1.5);
+  }
+
+  .band-inner {
+    height: auto;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .creed {
+    display: none;
+  }
+
+  .band nav {
+    margin-left: 0;
+    gap: 16px;
+    order: 3;
+    width: 100%;
+  }
+
+  .band nav a {
+    height: auto;
+    padding-bottom: 4px;
+  }
+
+  .network {
+    margin-left: auto;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .figures {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .figure:nth-child(2n) {
+    border-right: 0;
+    padding-right: 0;
+  }
+
+  .terms {
+    grid-template-columns: 1fr;
+  }
+
+  .terms dt {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .terms dd {
+    padding-top: 4px;
+  }
+
+  .terms .gloss {
+    padding-left: 0;
+    padding-top: 0;
+  }
+
+  .terms dd[data-wide="true"] {
+    grid-column: auto;
+  }
+
+  .record-line,
+  .columns {
+    grid-template-columns: 3fr 13fr;
+  }
+
+  .record-line > :nth-child(3),
+  .record-line > :nth-child(4),
+  .columns > :nth-child(3),
+  .columns > :nth-child(4) {
+    padding-left: 0;
+    grid-column: 2;
+    text-align: left;
+  }
+
+  .figures[data-inside="true"] {
+    width: 100%;
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .sequence {
+    width: 100%;
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .sequence-gate:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .cap-value {
+    font-size: 36px;
+  }
+
+  /*
+   * The threshold label anchors to the track rather than to its own tick. At this width a
+   * caption hung off a mark near the cap runs past the edge of the screen; hung off the
+   * left it is a caption for the track, and the tick still says where.
+   */
+  .measure-mark span {
+    left: 0;
+    transform: none;
+  }
+
+  .figures[data-inside="true"] .figure:nth-child(2n) {
+    border-right: 0;
+    padding-right: 0;
+  }
+
+  .record-meta {
+    width: 100%;
+  }
+
+  /* Stacked, and left-aligned: a right-aligned caption under a heading reads as an
+     orphan once there is no column for it to sit in. */
+  .section-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .section-head > :first-child,
+  .section-head > :last-child:not(:first-child) {
+    flex: none;
+    width: 100%;
+    text-align: left;
+    padding-left: 0;
+  }
+
+  .figures {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Long words are the only thing allowed to break the measure. */
+  .figure small,
+  .measure-foot,
+  .record-what,
+  .lede,
+  .empty {
+    overflow-wrap: anywhere;
+  }
+
+  .measure-foot {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .band nav {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* Stacked: three fields and two buttons do not fit on one line at this width, and a
+     decision is not a control to make somebody scroll sideways for. */
+  .controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .controls button {
+    width: 100%;
+  }
+
+  .scroller {
+    overflow-x: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* biome-ignore-start lint/complexity/noImportantStyles: a reduced-motion reset has to
+     outrank whatever set the animation, which is the whole point of the rule. */
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+  /* biome-ignore-end lint/complexity/noImportantStyles: as above. */
+}
+
+@media (max-width: 620px) {
+  .figures,
+  .figures[data-inside="true"] {
+    grid-template-columns: 1fr;
+  }
+
+  .figure,
+  .figures[data-inside="true"] .figure {
+    border-right: 0;
+    padding-right: 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .figures .figure:last-child {
+    border-bottom: 0;
+  }
+
+  /* At this width the line has no third to mark, so it becomes the right margin and
+     the measures are read against the edge of the page instead. */
+  .measure-cap {
+    left: 100%;
+  }
 }

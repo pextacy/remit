@@ -25,10 +25,19 @@ export type LoadedRemit = {
   readonly remit: Remit;
   readonly limits: Limits;
   readonly remitHash: Hex;
+  /**
+   * Owner signatures, if `remit:sign` has been run (RM-5).
+   *
+   * They were written to this file and then read by nothing on the ops side, so the
+   * mainnet path could not tell a Remit its owners had approved from one anybody with
+   * write access had produced. Carried here so the path that spends real money can check
+   * them against the Safe's *current* owners.
+   */
+  readonly signatures: readonly Hex[];
 };
 
 export function loadRemit(network: NetworkName): LoadedRemit {
-  let raw: { remit: unknown; limits: unknown; remitHash?: Hex };
+  let raw: { remit: unknown; limits: unknown; remitHash?: Hex; signatures?: unknown };
   try {
     raw = JSON.parse(
       readFileSync(join(REPO, "ops", "remits", `${network}.json`), "utf8"),
@@ -50,7 +59,25 @@ export function loadRemit(network: NetworkName): LoadedRemit {
     );
   }
 
-  return { remit, limits, remitHash };
+  // Shape-checked here rather than trusted: they are handed to `recoverTypedDataAddress`,
+  // and a value that is not a hex signature would throw inside the check instead of
+  // failing it — which reads as a crash rather than as a Remit nobody signed.
+  const signatures = Array.isArray(raw.signatures)
+    ? raw.signatures.filter(
+        (signature): signature is Hex =>
+          typeof signature === "string" && /^0x[0-9a-fA-F]+$/.test(signature),
+      )
+    : [];
+
+  if (Array.isArray(raw.signatures) && signatures.length !== raw.signatures.length) {
+    fail(
+      `ops/remits/${network}.json carries ${raw.signatures.length} signature(s), of ` +
+        `which ${raw.signatures.length - signatures.length} are not signatures. A Remit ` +
+        "that claims an approval nobody can check is worse than an unsigned one.",
+    );
+  }
+
+  return { remit, limits, remitHash, signatures };
 }
 
 /** Refuse to act unless the operator named the Remit they meant. */

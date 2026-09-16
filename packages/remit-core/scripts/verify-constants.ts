@@ -59,6 +59,16 @@ const SAFE_VERSION_ABI = [
 ] as const;
 
 let failures = 0;
+/**
+ * Reads that never answered.
+ *
+ * Counted apart from disagreements, because they are a different fact and this script
+ * runs immediately before a mainnet execution. "The constant changed" and "the endpoint
+ * would not answer" call for different actions, and an operator who is about to spend
+ * real money should not have to guess which happened. Both are non-zero exits: you may
+ * not proceed on a constant nobody verified.
+ */
+let unknown = 0;
 
 /**
  * Public RPCs rate-limit, and a rate-limited read is not a constant that changed.
@@ -90,6 +100,30 @@ function check(label: string, ok: boolean, detail: string): void {
   process.stdout.write(`${mark} ${label.padEnd(46)} ${detail}\n`);
 }
 
+/** A read that could not be made. Not a pass, and not a constant that changed. */
+function unreadable(label: string, error: unknown): void {
+  unknown += 1;
+  const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
+  process.stdout.write(`??   ${label.padEnd(46)} ${detail}\n`);
+}
+
+/**
+ * Run one check, and let an endpoint that will not answer be its own outcome.
+ *
+ * `retry` throws once it gives up, and every call sat unguarded under a top-level
+ * `await` — so a rate-limited public RPC took the whole script down with a stack trace,
+ * part-way through, leaving the operator without even a list of what *had* been checked.
+ * The script whose job is to be run before spending real money is the last one that
+ * should end that way.
+ */
+async function attempt(label: string, run: () => Promise<void>): Promise<void> {
+  try {
+    await run();
+  } catch (error) {
+    unreadable(label, error);
+  }
+}
+
 async function hasCode(client: PublicClient, address: Address): Promise<number> {
   const code = await client.getCode({ address });
   return code === undefined ? 0 : (code.length - 2) / 2;
@@ -113,8 +147,32 @@ async function verifyChain(chainId: SupportedChainId): Promise<void> {
   const client = createPublicClient({ transport: http(rpc) }) as PublicClient;
   process.stdout.write(`\nchain ${chainId} via ${rpc}\n`);
 
-  const observed = await retry("eth_chainId", () => client.getChainId());
+  let observed: number;
+  try {
+    observed = await retry("eth_chainId", () => client.getChainId());
+  } catch (error) {
+    unreadable("eth_chainId", error);
+    process.stdout.write("     nothing else on this chain was checked\n");
+    return;
+  }
+
   check("eth_chainId matches", observed === chainId, String(observed));
+  if (observed !== chainId) {
+    /**
+     * Stop here rather than checking every address against the wrong chain.
+     *
+     * Each one would come back with no code or no answer, and the operator would read a
+     * wall of failures whose single cause is one misconfigured URL — with the real
+     * message, this line, scrolled off the top. The reads below also cost six retries
+     * each with a quadratic backoff, so a wrong RPC turned a two-second check into
+     * several minutes of confident nonsense.
+     */
+    process.stdout.write(
+      `     this endpoint serves chain ${observed}, not ${chainId} — nothing else on ` +
+        "this chain was checked. Fix the RPC URL and re-run.\n",
+    );
+    return;
+  }
 
   for (const [label, address] of [
     ["zodiac roles mastercopy", ROLES_MASTERCOPY],
@@ -123,62 +181,85 @@ async function verifyChain(chainId: SupportedChainId): Promise<void> {
     ["safe l2 singleton", SAFE_L2_SINGLETON],
     ["safe proxy factory", SAFE_PROXY_FACTORY],
   ] as const) {
-    const size = await retry(label, () => hasCode(client, getAddress(address)));
-    check(`${label} has code`, size > 0, `${size} bytes`);
+    await attempt(`${label} has code`, async () => {
+      const size = await retry(label, () => hasCode(client, getAddress(address)));
+      check(`${label} has code`, size > 0, `${size} bytes`);
+    });
   }
 
   for (const [label, address] of [
     ["safe singleton", SAFE_SINGLETON],
     ["safe l2 singleton", SAFE_L2_SINGLETON],
   ] as const) {
-    const version = await retry(`${label} VERSION`, () =>
-      client.readContract({
-        address: getAddress(address),
-        abi: SAFE_VERSION_ABI,
-        functionName: "VERSION",
-      }),
-    );
-    check(`${label} VERSION`, version === SAFE_VERSION, version);
+    await attempt(`${label} VERSION`, async () => {
+      const version = await retry(`${label} VERSION`, () =>
+        client.readContract({
+          address: getAddress(address),
+          abi: SAFE_VERSION_ABI,
+          functionName: "VERSION",
+        }),
+      );
+      check(`${label} VERSION`, version === SAFE_VERSION, version);
+    });
   }
 
   const usdc = getAddress(USDC[chainId]);
-  const symbol = await retry("usdc symbol", () =>
-    client.readContract({ address: usdc, abi: erc20Abi, functionName: "symbol" }),
-  );
-  const decimals = await retry("usdc decimals", () =>
-    client.readContract({ address: usdc, abi: erc20Abi, functionName: "decimals" }),
-  );
-  check("usdc symbol", symbol === "USDC", symbol);
-  check("usdc decimals", decimals === USDC_DECIMALS, String(decimals));
+  await attempt("usdc symbol/decimals", async () => {
+    const symbol = await retry("usdc symbol", () =>
+      client.readContract({ address: usdc, abi: erc20Abi, functionName: "symbol" }),
+    );
+    const decimals = await retry("usdc decimals", () =>
+      client.readContract({ address: usdc, abi: erc20Abi, functionName: "decimals" }),
+    );
+    check("usdc symbol", symbol === "USDC", symbol);
+    check("usdc decimals", decimals === USDC_DECIMALS, String(decimals));
+  });
 
-  const aToken = getAddress(AAVE_V3_A_USDC[chainId]);
-  const underlying = await retry("aUSDC underlying", () =>
-    client.readContract({
-      address: aToken,
-      abi: A_TOKEN_ABI,
-      functionName: "UNDERLYING_ASSET_ADDRESS",
-    }),
-  );
-  check("aUSDC underlying is USDC", getAddress(underlying) === usdc, underlying);
+  await attempt("aUSDC underlying is USDC", async () => {
+    const underlying = await retry("aUSDC underlying", () =>
+      client.readContract({
+        address: getAddress(AAVE_V3_A_USDC[chainId]),
+        abi: A_TOKEN_ABI,
+        functionName: "UNDERLYING_ASSET_ADDRESS",
+      }),
+    );
+    check("aUSDC underlying is USDC", getAddress(underlying) === usdc, underlying);
+  });
 
-  const provider = await retry("aave ADDRESSES_PROVIDER", () =>
-    client.readContract({
-      address: getAddress(AAVE_V3_POOL[chainId]),
-      abi: aavePoolAbi,
-      functionName: "ADDRESSES_PROVIDER",
-    }),
-  );
-  const expected = getAddress(AAVE_V3_POOL_ADDRESSES_PROVIDER[chainId]);
-  check("aave pool ADDRESSES_PROVIDER", getAddress(provider) === expected, provider);
+  await attempt("aave pool ADDRESSES_PROVIDER", async () => {
+    const provider = await retry("aave ADDRESSES_PROVIDER", () =>
+      client.readContract({
+        address: getAddress(AAVE_V3_POOL[chainId]),
+        abi: aavePoolAbi,
+        functionName: "ADDRESSES_PROVIDER",
+      }),
+    );
+    const expected = getAddress(AAVE_V3_POOL_ADDRESSES_PROVIDER[chainId]);
+    check("aave pool ADDRESSES_PROVIDER", getAddress(provider) === expected, provider);
+  });
 }
 
 for (const chainId of [BASE, BASE_SEPOLIA] as const) {
   await verifyChain(chainId);
 }
 
-process.stdout.write(
-  failures === 0
-    ? "\nall constants agree with chain\n"
-    : `\n${failures} disagreement(s) — fix docs/VERIFIED.md and addresses.ts before building on them\n`,
-);
-process.exit(failures === 0 ? 0 : 1);
+if (failures === 0 && unknown === 0) {
+  process.stdout.write("\nall constants agree with chain\n");
+} else {
+  if (failures > 0) {
+    process.stdout.write(
+      `\n${failures} disagreement(s) — fix docs/VERIFIED.md and addresses.ts before ` +
+        "building on them\n",
+    );
+  }
+  if (unknown > 0) {
+    // Said separately, because it is a different thing to go and fix. A constant nobody
+    // could read is not a constant that changed, and it is not a constant that was
+    // verified either.
+    process.stdout.write(
+      `${unknown} read(s) never answered — those constants are unverified, not wrong. ` +
+        "Set BASE_RPC_URL / BASE_SEPOLIA_RPC_URL to an endpoint that answers and re-run.\n",
+    );
+  }
+}
+process.exit(failures === 0 && unknown === 0 ? 0 : 1);

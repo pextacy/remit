@@ -22,6 +22,13 @@ pnpm --filter ops remit:issue --network anvil \
   --workflow ops/workflows/exec-with-role.workflow.json
 pnpm --filter ops fund --network anvil --usdc 100
 
+# Aave pulls the USDC, so the Safe has to have approved the pool. `p1` runs an approve of
+# its own and then spends it on its own supply, and `fund` adds USDC without adding an
+# allowance — so without this line the 0:20 step fails with `ModuleTransactionFailed`:
+# the role allows the call and Aave refuses it. That is a true refusal about the wrong
+# thing, on the one step whose point is that it works.
+pnpm --filter ops run exec --network anvil --action approve --amount 100
+
 REMIT_NETWORK=anvil pnpm --filter remit-console dev &   # http://localhost:3737
 ```
 

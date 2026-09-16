@@ -62,11 +62,21 @@ if (deltas.length === 0) {
   process.exit(0);
 }
 
+/**
+ * A widening needs `--yes`, on every network.
+ *
+ * This used to be `&& network.isMainnet`, which meant the one ceremony standing between a
+ * mistyped preset and an agent that can move funds somewhere unintended was never
+ * practised — `anvil-base` is a fork of Base mainnet precisely so the mainnet path is
+ * rehearsed as it runs, and `exec:mainnet` already requires `--confirm` everywhere for
+ * the same reason. A flag only ever typed for real is a flag nobody has typed.
+ */
 const widenings = deltas.filter((delta) => delta.widens);
-if (widenings.length > 0 && !args.flags.has("yes") && network.isMainnet) {
+if (widenings.length > 0 && !args.flags.has("yes")) {
   fail(
-    `${widenings.length} change(s) would widen the agent's authority on mainnet — ` +
-      "re-run with --yes once you have read every [WIDENS AUTHORITY] line above",
+    `${widenings.length} change(s) would widen what the agent may do` +
+      `${network.isMainnet ? " ON MAINNET" : ""} — re-run with --yes once you have read ` +
+      "every [WIDENS AUTHORITY] line above",
   );
 }
 
@@ -93,3 +103,54 @@ logEvent("p1.3.done", {
   targets: preset.targets.length,
   functions: preset.functions.length,
 });
+
+/**
+ * Read the chain again, and say whether it now says what the preset says.
+ *
+ * `encodePreset` only ever *adds*: `scopeTarget` and `scopeFunction`, and nothing that
+ * takes anything away. So a role carrying a function the preset does not list still
+ * carries it afterwards — and this script used to finish with a success line and exit
+ * zero, which reads as "applied, and the chain matches". It does not.
+ *
+ * That is not a corner. `revokeTarget` leaves every per-function scope in storage, so
+ * re-scoping a target restores functions nobody re-granted; the first place an operator
+ * would find out is here, and here was quiet about it.
+ *
+ * Applying is still the right thing to have done — the preset's own grants are now in
+ * place. What changes is the exit code and the last line an operator reads.
+ */
+const after = diffRole(
+  preset,
+  await readRole(publicClientFor(network), rolesModifier, roleKey, {
+    fromBlock: BigInt(deployment.rolesDeployedBlock ?? 0),
+  }),
+);
+
+say("");
+if (after.length === 0) {
+  say("applied — the chain now says exactly what the preset says");
+  process.exit(0);
+}
+
+say("applied, and the chain still does not say what the preset says:");
+say("");
+say(
+  renderDiff(after, {
+    roleKey,
+    rolesModifier,
+    asOfBlock: onChain.asOfBlock,
+    events: onChain.eventsReplayed,
+  }),
+);
+logEvent("roles.apply.residue", {
+  rolesModifier,
+  roleKey,
+  remaining: after.length,
+  subjects: after.map((delta) => delta.subject),
+});
+say("");
+say(
+  "Applying a preset grants; it does not take away. Use `roles:revoke --function` or " +
+    "`--target` for the lines above.",
+);
+process.exit(1);

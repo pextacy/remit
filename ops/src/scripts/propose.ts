@@ -25,7 +25,7 @@ import { USDC_DECIMALS } from "@remit/core";
 import { getAddress, parseUnits } from "viem";
 import { AAVE_POOL_FOR } from "../lib/actions.js";
 import { castFor } from "../lib/actors.js";
-import { networkFrom, option, parseArgs } from "../lib/args.js";
+import { networkFrom, numberOption, option, parseArgs } from "../lib/args.js";
 import { requireDeployment, requireField } from "../lib/deployment.js";
 import { fail, say } from "../lib/log.js";
 import { runPipeline } from "../lib/pipeline.js";
@@ -38,7 +38,28 @@ const rolesModifier = requireField(deployment, "rolesModifier");
 const loaded = loadRemit(network.name);
 const cast = await castFor(network);
 
-const amount = parseUnits(option(args, "amount") ?? "1", USDC_DECIMALS).toString();
+/**
+ * The amount, as base units.
+ *
+ * Refused here rather than at G1. A negative `--amount` parses fine — `parseUnits("-1")`
+ * is `-1000000n` — and G1 does refuse it, as `INTENT_MALFORMED` against the unsigned
+ * integer schema. That is the right answer to the wrong question: the operator typed a
+ * flag, and the message they should get names the flag.
+ */
+const amountArg = option(args, "amount") ?? "1";
+const amountUnits = (() => {
+  try {
+    const parsed = parseUnits(amountArg, USDC_DECIMALS);
+    if (parsed <= 0n) fail(`--amount must be greater than zero, not "${amountArg}"`);
+    return parsed.toString();
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("--amount")) throw error;
+    return fail(
+      `--amount "${amountArg}" is not a decimal amount of USDC — nothing was proposed`,
+    );
+  }
+})();
+const amount = amountUnits;
 const kind = option(args, "kind") ?? "supply";
 const counterpartyArg = option(args, "to") ?? option(args, "spender");
 
@@ -71,6 +92,11 @@ say(
 say(`intent    ${JSON.stringify(intent)}`);
 say("");
 
+const reviewTimeoutSeconds = numberOption(args, "review-timeout", {
+  min: 1,
+  max: 86_400,
+});
+
 const result = await runPipeline({
   network,
   remit: loaded.remit,
@@ -80,12 +106,18 @@ const result = await runPipeline({
   agent: cast.agent,
   intent,
   receiptsRoot: RECEIPTS_ROOT,
-  // G3 only exists when somebody is watching. `--review` turns it on and points it at
-  // the queue the console reads; without it the receipt records that nobody looked.
-  ...(args.flags.has("review") ? { reviewDir: REVIEW_ROOT } : {}),
-  ...(option(args, "review-timeout") === undefined
-    ? {}
-    : { reviewTimeoutSeconds: Number(option(args, "review-timeout")) }),
+  // G3 is on. It used to need `--review`, which meant the human gate could be removed
+  // by forgetting a flag — and the flag was easy to forget precisely on the runs where
+  // it mattered. `--no-review` still exists, has to be typed, and puts "nobody looked"
+  // in the receipt rather than quietly leaving G3 out of it.
+  ...(args.flags.has("no-review")
+    ? { whenUnreviewable: "proceed" as const }
+    : {
+        reviewDir: REVIEW_ROOT,
+      }),
+  // Refused where it was typed. A `NaN` timeout is no wait at all rather than a long
+  // one, and G3 would then refuse instantly with nobody having had the chance to look.
+  ...(reviewTimeoutSeconds === undefined ? {} : { reviewTimeoutSeconds }),
 });
 
 if (result.stage === "g1") {

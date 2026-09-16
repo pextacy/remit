@@ -32,8 +32,18 @@ export type LedgerEntry = {
 export const DAY_SECONDS = 86_400;
 export const HOUR_SECONDS = 3_600;
 
+/**
+ * Is this entry inside the window ending at `now`?
+ *
+ * There is deliberately no upper bound. An entry stamped in the future is either a clock
+ * that moved or a ledger somebody edited, and excluding it — which `entry.at <= now`
+ * did — is the one arithmetic that makes a cap *larger*: stamp tomorrow's second on
+ * today's spend and the day starts again. Fail-closed here means a future entry keeps
+ * counting until the window catches up with it, which is an agent that stops rather than
+ * an agent with no cap.
+ */
 function within(entry: LedgerEntry, now: number, windowSeconds: number): boolean {
-  return entry.at > now - windowSeconds && entry.at <= now;
+  return entry.at > now - windowSeconds;
 }
 
 /**

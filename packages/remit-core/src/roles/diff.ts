@@ -229,19 +229,43 @@ export function renderDiff(
   }
 
   const widenings = deltas.filter((delta) => delta.widens);
+  /**
+   * Authority the chain grants and the preset does not describe.
+   *
+   * A different question from `widens`, which is about what *applying* the preset would
+   * add. These are already live: the agent can make these calls now. They were counted
+   * only in the total, under a closing line that said "nothing here grants the role
+   * anything it does not already have" — true of applying the preset, and the last thing
+   * an operator should read beneath a `transfer` on the token the Safe holds.
+   */
+  const unlisted = deltas.filter((delta) => delta.kind === "remove");
 
   for (const delta of deltas) {
     const mark = delta.kind === "add" ? "+" : delta.kind === "remove" ? "-" : "~";
-    lines.push(`${mark} ${delta.subject}${delta.widens ? "   [WIDENS AUTHORITY]" : ""}`);
+    const tag = delta.widens
+      ? "   [WIDENS AUTHORITY]"
+      : delta.kind === "remove"
+        ? "   [ON CHAIN, NOT IN THE PRESET]"
+        : "";
+    lines.push(`${mark} ${delta.subject}${tag}`);
     for (const line of delta.detail.split("\n")) lines.push(`    ${line}`);
   }
 
+  lines.push("", `${deltas.length} difference(s).`);
+
+  if (unlisted.length > 0) {
+    lines.push(
+      `${unlisted.length} of them is authority the role has on chain right now that this ` +
+        "preset does not describe. Applying the preset does not remove it — `roles:revoke`",
+      "does. Read those lines first: they are what the agent can already do.",
+    );
+  }
+
   lines.push(
-    "",
-    `${deltas.length} difference(s), ${widenings.length} of which widen what the agent may do.`,
     widenings.length === 0
-      ? "Nothing here grants the role anything it does not already have."
-      : "Read every [WIDENS AUTHORITY] line again before applying.",
+      ? "Applying this preset grants the role nothing it does not already have."
+      : `${widenings.length} line(s) would widen what the agent may do. Read every ` +
+          "[WIDENS AUTHORITY] line again before applying.",
   );
 
   return lines.join("\n");

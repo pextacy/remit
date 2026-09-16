@@ -30,6 +30,7 @@ export type DriftFinding = {
     | "REMIT_SELECTOR_NOT_SCOPED"
     | "REMIT_TARGET_OVER_CLEARED"
     | "REMIT_AGENT_NOT_MEMBER"
+    | "REMIT_EXTRA_ROLE_MEMBER"
     | "REMIT_SIGNATURES_INVALID";
   readonly detail: string;
 };
@@ -82,13 +83,36 @@ export async function checkPresetDrift(input: DriftInput): Promise<DriftCheck> {
 
   // 2. The agent must actually be in the role. A Remit over a role nobody is in is a
   //    document about nothing — and this is also how a pulled kill switch shows up.
-  if (
-    input.agent !== undefined &&
-    onChain.members.get(getAddress(input.agent)) !== true
-  ) {
+  const agent = getAddress(input.agent);
+  if (onChain.members.get(agent) !== true) {
     findings.push({
       code: "REMIT_AGENT_NOT_MEMBER",
       detail: `${input.agent} is not a member of ${input.remit.roleKey} on chain`,
+    });
+  }
+
+  /**
+   * 2b. And nobody else may be.
+   *
+   * Every check below this one reasons about what *the agent* may do. A second member
+   * holds the identical preset, is named by no Remit and no receipt, and is revoked by
+   * nothing: the kill switch acts on the agent this deployment recorded, so pulling it
+   * reports success while the other address keeps the whole authority.
+   *
+   * It is the drift that leaves the preset itself spotless, which is why checking the
+   * preset alone never found it.
+   */
+  const extra = [...onChain.members.entries()]
+    .filter(([member, isMember]) => isMember && member !== agent)
+    .map(([member]) => member);
+
+  if (extra.length > 0) {
+    findings.push({
+      code: "REMIT_EXTRA_ROLE_MEMBER",
+      detail:
+        `${extra.length} address(es) other than the agent are members of ` +
+        `${input.remit.roleKey}: ${extra.join(", ")}. Each holds this preset in full, ` +
+        "and the kill switch does not revoke any of them.",
     });
   }
 

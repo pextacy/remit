@@ -80,6 +80,24 @@ export const USDC: Readonly<Record<SupportedChainId, `0x${string}`>> = {
 export const USDC_DECIMALS = 6 as const;
 
 /**
+ * Circle's testnet USDC on Base Sepolia — the token this build does **not** use.
+ *
+ * It is here so a check can name it, not so anything can reach for it. Aave's Base
+ * Sepolia market lists the token above; Circle's faucet hands out this one; and the two
+ * are indistinguishable from the outside — both answer `symbol()` with "USDC" and
+ * `decimals()` with 6. Funding a Safe from the wrong faucet therefore looks exactly like
+ * funding it from the right one, right up to a `supply` that reverts inside Aave for a
+ * reason that reads as a preset failure.
+ *
+ * Verified on Base Sepolia 2026-09-15: `symbol()` "USDC", `decimals()` 6, and the aUSDC
+ * at `AAVE_V3_A_USDC[84532]` answers `UNDERLYING_ASSET_ADDRESS()` with the *other* one.
+ * On Base mainnet there is no such pair — Circle's native USDC is the token Aave lists —
+ * so this is Base Sepolia only.
+ */
+export const CIRCLE_TESTNET_USDC_BASE_SEPOLIA =
+  "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as const;
+
+/**
  * Aave's interest-bearing USDC token, per chain.
  *
  * Source: aave-dao/aave-address-book, `USDC.A_TOKEN`, commit

@@ -31,10 +31,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-from remit_bridge import core, receipts
+from remit_bridge import amounts, core, receipts, review
 from remit_bridge.config import (
-    CHAIN_IDS,
     REPO_ROOT,
+    env_rpc_url,
     load_deployment,
     load_remit,
     receipts_dir,
@@ -48,7 +48,10 @@ from remit_bridge.errors import (
     RemitError,
 )
 from remit_bridge.keeperhub import KeeperHubClient
+from remit_bridge.ledger import append_ledger, read_ledger
+from remit_bridge.lock import file_lock
 from remit_bridge.log import log_event
+from remit_bridge.pipeline_lock import pipeline_lock_path
 
 #: One implementation, in `log.py`, so a library module can use it too — a library that
 #: `print`s is a library that cannot be embedded.
@@ -77,9 +80,17 @@ def _build_intent(kind: str, amount_units: str, counterparty: str) -> dict[str, 
 
 
 def _to_units(amount: str) -> str:
-    """USDC has six decimals. Parsed exactly, never through a float."""
-    whole, _, fraction = amount.partition(".")
-    return str(int(whole or "0") * 1_000_000 + int((fraction or "").ljust(6, "0")[:6]))
+    """USDC has six decimals. Parsed exactly, never through a float.
+
+    One implementation, shared with the Almanak adapter. It was a second, looser copy:
+    it truncated a seventh decimal where the adapter refuses one — so `--amount
+    1.9999999` supplied 1.999999, a different action from the one that was typed — and
+    it let `int("abc")` out as a traceback rather than a refusal.
+    """
+    try:
+        return amounts.to_units(amount)
+    except (TypeError, ValueError) as error:
+        raise ConfigError(f"--amount {amount!r} is not an amount: {error}") from error
 
 
 def _ops(script: str, forwarded: list[str]) -> int:
@@ -161,10 +172,24 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
     count = verification.get("count", 0)
     problems = verification.get("problems", [])
+    # Receipts written under a Remit other than the one on disk. Not a fault: a Remit
+    # expires and is reissued rather than widened, so any chain older than one Remit's
+    # life spans several. Their hashes and links are checked like every other record;
+    # what cannot be checked is the authority the supplied documents do not describe.
+    unchecked = verification.get("uncheckedAgainstDocuments", [])
 
     _say(f"receipts   {directory}")
     _say(f"checked    {count} {documents}")
     _say(f"head       {verification.get('head')}")
+    if unchecked:
+        remits = sorted({str(record.get("remitHash")) for record in unchecked})
+        _say(
+            f"note       {len(unchecked)} receipt(s) name {len(remits)} earlier "
+            "Remit(s); their hashes and links check out, their authority is not in "
+            "these documents"
+        )
+        for remit_hash in remits:
+            _say(f"           {remit_hash}")
 
     for problem in problems:
         _say(
@@ -184,11 +209,79 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0 if ok else 2
 
 
+def _checked_remit(network: str) -> Any:
+    """Load the Remit, and re-derive the hash it claims for itself.
+
+    Every receipt this process writes names `remitHash` as the authority the action
+    happened under, and the file's own claim about that hash is the one field in it that
+    nothing else checks. A document edited after it was issued would otherwise hand a
+    whole chain of receipts a key that points at nothing — so it is recomputed from the
+    document, by the same code that issued it, before anything is accepted.
+    """
+    bundle = load_remit(network)
+    answer, _ = core.invoke("hash", {"remit": bundle.remit})
+    derived = str(answer.get("remitHash", ""))
+
+    if derived != bundle.remit_hash:
+        raise ConfigError(
+            f"ops/remits/{network}.json says its remitHash is {bundle.remit_hash}, but "
+            f"the document hashes to {derived} — the file was edited after it was issued"
+        )
+    return bundle
+
+
 def cmd_run(args: argparse.Namespace) -> int:
-    """One intent, through G1, then KeeperHub, then a receipt — whatever happened."""
+    """One intent, through G1, then KeeperHub, then a receipt — whatever happened.
+
+    Held under the same lock the ops pipeline takes, for the same reason: G1's daily cap
+    and rate limit are read-modify-write over a ledger that is only written once the
+    chain has answered, and two runs evaluating them against the same state each see a
+    day in which nothing has been spent. The wait allows for a KeeperHub execution to
+    reach a terminal state ahead of us.
+    """
+    # Long enough for the holder to finish a review of its own and the chain work behind
+    # it. `stale_seconds` is left at its default: the holder heartbeats while it works, so
+    # a process killed mid-hold is displaced in a minute however long the hold was.
+    with file_lock(
+        pipeline_lock_path(args.network),
+        timeout_seconds=float(args.review_timeout) + 120.0,
+        on_wait=lambda holder: _say(
+            f"WAITING    another proposal on {args.network} holds the gates: {holder}"
+        ),
+    ):
+        return _run_locked(args)
+
+
+def _run_locked(args: argparse.Namespace) -> int:
     deployment = load_deployment(args.network)
-    bundle = load_remit(args.network)
+    bundle = _checked_remit(args.network)
     directory = receipts_dir(args.network)
+
+    # RM-4, before anything is proposed. `serve` refuses to start on drift; `run` submits
+    # through the same KeeperHub with the same authority and was checking nothing — so a
+    # preset that had drifted made every limit in the Remit a promise the chain had
+    # stopped keeping, and G1 would have agreed with it all the way to G4.
+    check = core.check_preset(
+        rpc_url=env_rpc_url(args.network),
+        chain_id=deployment.chain_id,
+        remit=bundle.remit,
+        limits=bundle.limits,
+        roles_modifier=deployment.roles_modifier,
+        agent=deployment.agent_signer,
+        from_block=deployment.roles_deployed_block,
+        signatures=bundle.signatures,
+    )
+    if not check.get("ok"):
+        for finding in check.get("findings", []):
+            _say(f"DRIFT      {finding.get('code')}: {finding.get('detail')}")
+        _log("run.refused", code="REMIT_PRESET_DRIFT", findings=check.get("findings"))
+        _say("")
+        _say(
+            "refusing to run: the Remit and the chain disagree. Fix the preset with "
+            "`roles:diff` and `roles:apply`, or reissue the Remit — do not widen either "
+            "to make this pass."
+        )
+        return 5
 
     counterparty = args.to or deployment.safe
     intent = _build_intent(args.kind, _to_units(args.amount), counterparty)
@@ -199,10 +292,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         decision = core.check_envelope(
             remit=bundle.remit,
             limits=bundle.limits,
-            chain_id=CHAIN_IDS[args.network],
+            chain_id=deployment.chain_id,
             intent=intent,
             now=int(time.time()),
-            ledger=[],
+            # The real history, from the file the ops tooling shares. An empty list would
+            # tell G1 that nothing has ever been spent, and the daily cap and the rate
+            # limit — the two rules G1 can only enforce against a history — would pass
+            # every time however much had already moved.
+            ledger=read_ledger(args.network),
+            # G3-5: the version this agent last executed under. When it differs from the
+            # one the Remit binds, the strategy has changed since anybody watched it act
+            # and the action is held for review whatever its size.
+            seen_strategy_hash=core.seen_strategy_hash(directory),
         )
     except EnvelopeRefused as refusal:
         body = receipts.refused_at_g1(
@@ -224,6 +325,160 @@ def cmd_run(args: argparse.Namespace) -> int:
     _say(
         f"           {decision['usd']} USD, review required: {decision['requiresReview']}"
     )
+
+    # ---- G2: one eth_call, no gas ----------------------------------------
+    # Run, not assumed. The receipt below claims an outcome for this gate, and the claim
+    # has to be a reading: the `policy_check` node that would run it inside a KeeperHub
+    # workflow is the contribution in `packages/keeperhub-safe/`, which is not deployed
+    # anywhere yet (README, "Transaction links"). Writing "G2 pass" without asking would
+    # be the audit trail asserting a gate that never ran.
+    check = core.preflight(
+        rpc_url=env_rpc_url(args.network),
+        chain_id=deployment.chain_id,
+        roles_modifier=deployment.roles_modifier,
+        role_key=deployment.role_key,
+        agent=deployment.agent_signer,
+        target=action["target"],
+        calldata=action["calldata"],
+    )
+
+    if not check.get("ok"):
+        reason = str(check.get("reason", "refused at G2"))
+        body = receipts.build_body(
+            deployment=deployment,
+            bundle=bundle,
+            intent=decision["intent"],
+            action=action,
+            usd=decision["usd"],
+            gates=[
+                {"gate": "G1", "outcome": "pass"},
+                {
+                    "gate": "G2",
+                    "outcome": "refused",
+                    "code": str(check.get("code", "")),
+                    "detail": reason,
+                },
+            ],
+            outcome="rejected_g2",
+            submission=receipts.submission("none"),
+        )
+        written = receipts.write(directory, body)
+        _say(f"G2 REFUSED {check.get('code')}: {reason}")
+        _say(f"receipt    {written['file']}  {written['selfHash']}")
+        _say("")
+        _say("One eth_call, no gas. Nothing was submitted.")
+        _log("gate.g2", outcome="refused", reason=reason)
+        return 3
+
+    _say("G2 PASS    the Roles Modifier would allow this call")
+
+    # ---- G3: a person, and silence is a refusal --------------------------
+    #
+    # This path recorded "G3 skipped" and submitted anyway, so an action over the Remit's
+    # review threshold reached KeeperHub with nobody having looked at it. The queue and
+    # the console it is read in already existed; only the wiring was missing.
+    g3: list[dict[str, Any]] = []
+    if decision.get("requiresReview"):
+        review_id = review.new_id()
+        reason = str(decision.get("reviewReason") or "above the Remit's review threshold")
+        review.enqueue(
+            review_id=review_id,
+            network=args.network,
+            remit_hash=bundle.remit_hash,
+            intent=decision["intent"],
+            action=action,
+            usd=decision["usd"],
+            # Exact, from the integer micro-dollars the gate computed.
+            headroom_usd=amounts.micros_to_usd(decision.get("headroomMicros", "0")),
+            reason=reason,
+        )
+        _say(f"G3 WAITING {review_id} — a person has to approve this in the console")
+        _say(f"           {reason}")
+        _log("gate.g3", outcome="waiting", id=review_id, usd=decision["usd"])
+
+        answer = review.wait_for_decision(
+            review_id, timeout_seconds=float(args.review_timeout)
+        )
+        approved = answer is not None and answer.get("decision") == "approved"
+        by = "nobody" if answer is None else str(answer.get("by", "an operator"))
+
+        if not approved:
+            code = "G3_TIMEOUT" if answer is None else "G3_DECLINED"
+            detail = (
+                f"{review_id}: nobody answered in {args.review_timeout:.0f}s"
+                if answer is None
+                else f"{by}{f': {answer.get("note")}' if answer.get('note') else ''}"
+            )
+            body = receipts.build_body(
+                deployment=deployment,
+                bundle=bundle,
+                intent=decision["intent"],
+                action=action,
+                usd=decision["usd"],
+                gates=[
+                    {"gate": "G1", "outcome": "pass"},
+                    {"gate": "G2", "outcome": "pass"},
+                    {
+                        "gate": "G3",
+                        "outcome": "declined",
+                        "code": code,
+                        "detail": detail,
+                    },
+                ],
+                outcome="declined_g3",
+                submission=receipts.submission("none"),
+            )
+            written = receipts.write(directory, body)
+            _say(f"G3 {'TIMEOUT' if answer is None else 'DECLINED'} {detail}")
+            _say(f"receipt    {written['file']}  {written['selfHash']}")
+            _say("")
+            _say("A person said no, or nobody said anything. Nothing was submitted.")
+            _log("gate.g3", outcome="declined", id=review_id, code=code)
+            return 4
+
+        _say(f"G3 APPROVED {by}")
+        _log("gate.g3", outcome="approved", id=review_id, by=by)
+        g3 = [{"gate": "G3", "outcome": "pass", "detail": f"approved by {by}"}]
+
+        # G1 again, at the time the action would actually happen. A review takes as long
+        # as a person takes, and a Remit that expires while somebody is deciding is
+        # authority the operator had already withdrawn.
+        try:
+            core.check_envelope(
+                remit=bundle.remit,
+                limits=bundle.limits,
+                chain_id=deployment.chain_id,
+                intent=decision["intent"],
+                now=int(time.time()),
+                ledger=read_ledger(args.network),
+                seen_strategy_hash=core.seen_strategy_hash(directory),
+            )
+        except EnvelopeRefused as refusal:
+            body = receipts.build_body(
+                deployment=deployment,
+                bundle=bundle,
+                intent=decision["intent"],
+                action=action,
+                usd=decision["usd"],
+                gates=[
+                    {"gate": "G1", "outcome": "pass"},
+                    {"gate": "G2", "outcome": "pass"},
+                    *g3,
+                    {
+                        "gate": "G1",
+                        "outcome": "refused",
+                        "code": str(refusal.error.get("code", "OUT_OF_REMIT")),
+                        "detail": f"{refusal.error.get('message')} — re-checked after "
+                        "the review and no longer holds",
+                    },
+                ],
+                outcome="rejected_g1",
+                submission=receipts.submission("none"),
+            )
+            written = receipts.write(directory, body)
+            _say(f"G1 REFUSED {refusal.error.get('code')} — after the review")
+            _say(f"receipt    {written['file']}  {written['selfHash']}")
+            return 2
 
     # ---- KeeperHub: the only thing that submits (KH-1) --------------------
     api_key = require_env(
@@ -284,9 +539,10 @@ def cmd_run(args: argparse.Namespace) -> int:
                     {"gate": "G1", "outcome": "pass"},
                     {
                         "gate": "G2",
-                        "outcome": "skipped",
-                        "detail": "run inside the workflow",
+                        "outcome": "pass",
+                        "detail": "preflight clean, no gas spent",
                     },
+                    *g3,
                     {"gate": "G4", "outcome": "reverted", "detail": unresolved.message},
                 ],
                 outcome="unresolved",
@@ -310,7 +566,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         usd=decision["usd"],
         gates=[
             {"gate": "G1", "outcome": "pass"},
-            {"gate": "G2", "outcome": "pass", "detail": "policy_check node"},
+            {"gate": "G2", "outcome": "pass", "detail": "preflight clean, no gas spent"},
+            *g3,
             {
                 "gate": "G4",
                 "outcome": "pass" if resolution.succeeded else "reverted",
@@ -326,7 +583,27 @@ def cmd_run(args: argparse.Namespace) -> int:
             explorer=resolution.explorer_link,
         ),
     )
+    # The receipt is sealed before the ledger is touched. A KeeperHub execution that
+    # succeeded has already moved value, and the record of it is the thing that must
+    # exist; `append_ledger` can legitimately raise — an unreadable ledger is a hard
+    # failure by design — and doing it first meant an executed transaction could take the
+    # process down before its receipt was written, leaving gas spent and no trace.
     written = receipts.write(directory, body)
+
+    # Only once value actually moved: a reverted execution spent gas and moved nothing,
+    # and charging it against the daily cap would tighten the remit every time the chain
+    # said no.
+    if resolution.succeeded:
+        try:
+            append_ledger(args.network, decision["entry"])
+        except RemitError as error:
+            # Loud, and not swallowed. The receipt is on disk; what is now in doubt is
+            # the cap, and an operator has to know that before the next action.
+            _say(
+                "LEDGER     the spend could not be recorded — the daily cap is now wrong"
+            )
+            _log("ledger.append.failed", txHash=resolution.tx_hash, **error.as_dict())
+            raise
 
     _say(f"tx         {resolution.tx_hash}")
     _say(f"receipt    {written['file']}  {written['selfHash']}")
@@ -350,8 +627,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from remit_bridge.adapters import almanak
 
     deployment = load_deployment(args.network)
-    bundle = load_remit(args.network)
-    rpc_url = almanak.env_rpc_url(args.network)
+    bundle = _checked_remit(args.network)
+    rpc_url = env_rpc_url(args.network)
 
     check = core.check_preset(
         rpc_url=rpc_url,
@@ -435,6 +712,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
         workflow_id=os.environ.get("KEEPERHUB_WORKFLOW_ID") or None,
         host=args.host,
         port=args.port,
+        review_timeout_seconds=float(args.review_timeout),
+    )
+
+    _say(
+        f"review     actions above {bundle.limits.get('requireReviewAboveUsd', '?')} USD "
+        f"wait for a person, up to {args.review_timeout}s; silence is a refusal"
     )
 
     _say("")
@@ -493,6 +776,12 @@ def main(argv: list[str] | None = None) -> int:
         default=str(REPO_ROOT / "strategies" / "remit_usdc_lender" / "strategy.py"),
         help="the strategy file whose hash the Remit binds",
     )
+    serve.add_argument(
+        "--review-timeout",
+        type=float,
+        default=600.0,
+        help="how long an action waits for a person before silence refuses it",
+    )
     serve.add_argument("--once", action="store_true", help=argparse.SUPPRESS)
     serve.set_defaults(handler=cmd_serve)
 
@@ -501,6 +790,12 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--kind", default="supply")
     run.add_argument("--amount", default="1")
     run.add_argument("--to", default=None, help="counterparty; defaults to the Safe")
+    run.add_argument(
+        "--review-timeout",
+        type=float,
+        default=600.0,
+        help="how long an action above the threshold waits for a person",
+    )
     run.set_defaults(handler=cmd_run)
 
     args = parser.parse_args(argv)

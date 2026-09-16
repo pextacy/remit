@@ -102,7 +102,9 @@ export ANVIL_BASE_RPC_URL=http://127.0.0.1:8547
 
 pnpm --filter ops safe:deploy  --network anvil-base --salt remit-mainnet
 pnpm --filter ops roles:deploy --network anvil-base --salt remit-mainnet
-pnpm --filter ops roles:apply  --network anvil-base
+# `--yes` because applying a preset to a fresh Roles instance *is* a widening, on
+# every network. Rehearsing it without the flag is rehearsing a different command.
+pnpm --filter ops roles:apply  --network anvil-base --yes
 pnpm --filter ops fund         --network anvil-base --usdc 30
 pnpm --filter ops remit:issue  --network anvil-base \
   --strategy strategies/remit_usdc_lender/strategy.py \

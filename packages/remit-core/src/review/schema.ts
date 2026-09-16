@@ -14,9 +14,24 @@ import { z } from "zod";
 import { intentSchema } from "../schema/intent.js";
 import { addressSchema, bytes32Schema, unixSecondsSchema } from "../schema/primitives.js";
 
+/**
+ * A review id, and the only shape one may take.
+ *
+ * The id names a file on disk in both directions: the bridge writes `<id>.json` into the
+ * queue and the console writes `<id>.json` into the decisions directory, from a form
+ * field. Anything that can contain a separator or a `..` is therefore a write outside the
+ * queue by whoever can reach the console, so the shape is pinned here — at the schema
+ * both halves share — rather than trusted to each caller.
+ *
+ * `randomUUID()`, which is what produces these, fits comfortably.
+ */
+export const reviewIdSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, "not a review id");
+
 export const reviewItemSchema = z
   .object({
-    id: z.string().min(1),
+    id: reviewIdSchema,
     at: unixSecondsSchema,
     network: z.string().min(1),
     remitHash: bytes32Schema,
@@ -64,7 +79,7 @@ export type ReviewItem = z.infer<typeof reviewItemSchema>;
 
 export const reviewDecisionSchema = z
   .object({
-    id: z.string().min(1),
+    id: reviewIdSchema,
     at: unixSecondsSchema,
     decision: z.enum(["approved", "declined"]),
     /** Who decided. Free text: the console has one operator session, not accounts. */

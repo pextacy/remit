@@ -23,6 +23,7 @@ export * from "./schema/intent.js";
 export * from "./schema/limits.js";
 export * from "./schema/primitives.js";
 export * from "./schema/remit.js";
+export * from "./util/lock.js";
 export * from "./verify/envelope.js";
 export * from "./verify/errors.js";
 export * from "./verify/ledger.js";

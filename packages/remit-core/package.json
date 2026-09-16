@@ -18,14 +18,16 @@
     "build": "tsc -p tsconfig.json",
     "type-check": "tsc -p tsconfig.check.json",
     "verify:constants": "tsx scripts/verify-constants.ts",
-    "cli": "tsx src/cli.ts"
+    "cli": "tsx src/cli.ts",
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "viem": "2.56.5",
     "zod": "4.6.4"
   },
   "devDependencies": {
-    "@types/node": "26.5.1"
+    "@types/node": "26.5.1",
+    "tsx": "4.23.13"
   },
   "bin": {
     "remit-core": "./dist/cli.js"
