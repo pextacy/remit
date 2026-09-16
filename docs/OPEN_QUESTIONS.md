@@ -27,7 +27,14 @@ with `CONFIG_MISSING` when there is no key — it does not fall back to a local 
 because a fallback would make KH-1 false in exactly the case where it matters. The first
 run against the live service is therefore a configuration step, not a build step.
 
-**Unblocks when** someone creates the account and generates a key. Then:
+**Partly unblocked on 2026-09-15.** The account exists and a key with read and write scopes
+was issued. A read-only probe through `KeeperHubClient` — `GET /api/execute/{uuid}/status`
+against a made-up id — answered **404 `Execution not found`** rather than 401 or 403, so
+the key authenticates and carries `mcp:read`. That settles the first half of item 5 below.
+Recorded in docs/VERIFIED.md §5. The write routes are still unobserved: exercising them
+submits a transaction.
+
+**Remaining, and what unblocks each:**
 
 1. `claude mcp add --transport http keeperhub https://app.keeperhub.com/mcp` — the MCP
    server is how a workflow gets composed and reviewed before it is pinned, and it is one
@@ -50,7 +57,25 @@ run against the live service is therefore a configuration step, not a build step
 Until then the bridge cannot be written against the real service, and every P3 estimate
 carries this risk.
 
-### OQ-6 — no funded key, so no Base Sepolia transaction hash yet
+### OQ-6 — ~~no funded key, so no Base Sepolia transaction hash yet~~ **closed 2026-09-15**
+
+Closed. Base Sepolia ETH was reached without any mainnet balance — every faucet that
+gates on one was refused — by taking Ethereum Sepolia ETH from Google's faucet and
+bridging it through Base's own `L1StandardBridge` at
+`0xfd0Bf71F60660E2f608ed56e1659C450eB113120` (address from docs.base.org, `OTHER_BRIDGE()`
+checked on chain before anything was sent, then a 0.001 ETH deposit confirmed to land
+before the rest followed).
+
+USDC came from Aave's own faucet contract rather than its web app: the Base Sepolia test
+token's `owner()` is Aave's `Faucet` at `0xD9145b5F45Ad4519c7ACcD6E0A4A82e83bB8A6Dc`,
+whose `isPermissioned()` is `false`, so `mint(token, to, amount)` is callable by anyone
+and the Safe was funded directly.
+
+What the run produced is in the README's transaction table and in
+`receipts/base-sepolia/`. Three bugs it found — all invisible on a fork — are in
+docs/VERIFIED.md.
+
+<details><summary>the original entry</summary>
 
 P1 is complete against a local Anvil fork of Base Sepolia: a real Safe, a real Roles v2
 instance at the canonical mastercopy, the preset applied, value moved, and four refusals
@@ -72,6 +97,8 @@ in place to close it in minutes once there is a key:
 
 The scripts are network-agnostic; the fork path and the testnet path differ only in where
 the signing authority comes from.
+
+</details>
 
 ### OQ-8 — the strategy-driven transaction still needs KeeperHub
 

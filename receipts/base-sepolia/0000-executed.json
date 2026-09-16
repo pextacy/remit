@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "sequence": 0,
+  "at": 1789492292,
+  "network": "base-sepolia",
+  "chainId": 84532,
+  "remitHash": "0x21297f434239b179c57791cafc7bfb41ae2799d8c0d40a25e71d9986920925b4",
+  "strategyHash": "0xd97a794ba0c4aa02a9937c88943289cf1e3257e6416caab38dfc0f0d1b980a66",
+  "workflowHash": "0xdfdda4b121e81cbe41742a26dd6ec1cb78e0d066c1c10517b2ebbe16b8353a68",
+  "limitsHash": "0x7c2c5a2e1954e513346913d3b6015e1861bd8d14b735ad0ae3c2cbaea52e84d2",
+  "roleKey": "0x72656d69742d6167656e74000000000000000000000000000000000000000000",
+  "safe": "0x4e67371BA5cA46BF64a2B91c7b51bB8b0bfC87d1",
+  "rolesModifier": "0xe8777944e78B34e788f57a340Ea85F3D7c04FA68",
+  "agent": "0xd5808b10C9038F2Ae305b62FC716F17729206C6b",
+  "intent": {
+    "kind": "approve",
+    "amount": "1000000",
+    "asset": "USDC",
+    "spender": "0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27"
+  },
+  "action": {
+    "target": "0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f",
+    "signature": "approve(address,uint256)",
+    "selector": "0x095ea7b3",
+    "description": "approve 0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27 to spend 1000000 USDC",
+    "usd": "1"
+  },
+  "gates": [
+    {
+      "gate": "G1",
+      "outcome": "pass",
+      "detail": "approve 0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27 to spend 1000000 USDC"
+    },
+    {
+      "gate": "G2",
+      "outcome": "pass",
+      "detail": "preflight clean, no gas spent"
+    },
+    {
+      "gate": "G4",
+      "outcome": "pass",
+      "detail": "0xfe9956529b424f4f4d2b0c5d933af4f766942b3952b3514eca6a4b71931c75cd"
+    }
+  ],
+  "outcome": "executed",
+  "submission": {
+    "path": "ops-direct",
+    "executionId": null,
+    "workflowId": null,
+    "txHash": "0xfe9956529b424f4f4d2b0c5d933af4f766942b3952b3514eca6a4b71931c75cd",
+    "explorer": "https://sepolia.basescan.org/tx/0xfe9956529b424f4f4d2b0c5d933af4f766942b3952b3514eca6a4b71931c75cd",
+    "gasUsed": "104909"
+  },
+  "prevHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "selfHash": "0x76ca5715f2799edbb54d38d7e9f7b3f0b9afdc2071794d70edd8d24e86ae9b3e"
+}

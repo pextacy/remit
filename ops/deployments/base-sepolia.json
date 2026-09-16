@@ -1,0 +1,22 @@
+{
+  "network": "base-sepolia",
+  "chainId": 84532,
+  "safe": "0x4e67371BA5cA46BF64a2B91c7b51bB8b0bfC87d1",
+  "owners": [
+    "0x2B477982d76E1E62A8D1Fd5DA15cae5D93FA3BEE",
+    "0xd909beFA04b297BCbD19061dB4C3a33E0902c9bC",
+    "0x87ee844d0c40ce48B879B1093DC071A88EBB2e8c"
+  ],
+  "threshold": 2,
+  "updatedAt": "2026-09-15T17:04:20.503Z",
+  "rolesModifier": "0xe8777944e78B34e788f57a340Ea85F3D7c04FA68",
+  "rolesDeployedBlock": 46861655,
+  "roleKey": "0x72656d69742d6167656e74000000000000000000000000000000000000000000",
+  "agentSigner": "0xd5808b10C9038F2Ae305b62FC716F17729206C6b",
+  "presetAppliedAt": "2026-09-15T17:04:14.501Z",
+  "lastRemit": {
+    "safe": "0x4e67371BA5cA46BF64a2B91c7b51bB8b0bfC87d1",
+    "roleKey": "0x72656d69742d6167656e74000000000000000000000000000000000000000000",
+    "nonce": "1"
+  }
+}
