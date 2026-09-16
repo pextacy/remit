@@ -2,10 +2,13 @@
  * Every external address this project touches, on the only two chains it runs on.
  *
  * Nothing here was recalled. Each value came from a pinned upstream source and was then
- * confirmed against the chain itself with `cast` on 2026-09-13. The row for each one —
- * source URL, commit, probe, date — is in docs/VERIFIED.md. A plausible wrong address
- * moves real money to nowhere (CLAUDE.md §2.2), so treat this file as append-only and
- * add the VERIFIED.md row in the same commit.
+ * confirmed against the chain itself with `cast` on 2026-09-13. Every value here is
+ * re-derived from Base and Base Sepolia by
+ * `pnpm --filter @remit/core verify:constants`, which `submit:check` runs: a constant
+ * that has changed, or that no endpoint would answer for, fails there rather than in
+ * a transaction. A plausible wrong address moves real money to nowhere
+ * (CLAUDE.md §2.2), so treat this file as append-only and add a constant only
+ * together with the check that re-derives it.
  */
 
 /** Base mainnet. Real money. Every script defaults away from this (CLAUDE.md §2.4). */

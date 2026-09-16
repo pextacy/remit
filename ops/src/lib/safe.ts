@@ -30,7 +30,8 @@ import type { Network } from "./networks.js";
  *
  * Source: safe-global/safe-deployments `src/assets/v1.4.1/compatibility_fallback_handler.json`
  * at commit 7b1fb6d615ab2d2999550ec9166554b180e813e5 — `canonical` on both 8453 and 84532.
- * Verified 2026-09-13, see docs/VERIFIED.md.
+ * Verified 2026-09-13, and re-derived from the chain on every run of
+ * `pnpm --filter @remit/core verify:constants`.
  */
 export const SAFE_FALLBACK_HANDLER: Address =
   "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99";

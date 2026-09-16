@@ -284,7 +284,7 @@ async function run(): Promise<void> {
     hasKey,
     hasKey
       ? "KEEPERHUB_API_KEY is set"
-      : "KEEPERHUB_API_KEY is not set — the product path cannot submit (OQ-1)",
+      : "KEEPERHUB_API_KEY is not set — the product path cannot submit",
   );
 
   const cast = await castFor(network);

@@ -714,7 +714,7 @@ async function nh7(): Promise<void> {
   say("      three transactions from one EOA with no nonce manager in front of them");
   say("      collide, and the client refuses rather than replacing one silently.");
   say("      Managing that is what KeeperHub does, and evidencing *its* behaviour");
-  say("      needs an account (OQ-1). This evidences the problem, not the fix.");
+  say("      is its own job. This evidences the problem, not the fix.");
 }
 
 // ---------------------------------------------------------------------------

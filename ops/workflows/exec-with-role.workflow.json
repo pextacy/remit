@@ -26,7 +26,7 @@
   "inputs": ["safe", "rolesModifier", "roleKey", "target", "value", "data", "operation"],
   "notes": [
     "This document is Remit's declaration of what must run. It is authored here and hashed into the Remit as workflowHash.",
-    "It is NOT KeeperHub's serialisation of a registered workflow: that shape cannot be verified without an account, which is docs/OPEN_QUESTIONS.md OQ-1.",
+    "It is NOT KeeperHub's serialisation of a registered workflow: that shape is whatever the console stores when this is registered, and nobody has registered it — so the bridge takes the direct-execution route and the receipt records which route ran.",
     "P3 registers this workflow, records the id KeeperHub assigns, and reconciles the two. If KeeperHub's canonical definition differs, the Remit is reissued against the registered hash \u2014 a Remit is cheap, a wrong binding is not."
   ],
   "reliability": {

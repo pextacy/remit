@@ -540,7 +540,8 @@ def _run_locked(args: argparse.Namespace) -> int:
             )
             kind = "workflow"
         else:
-            # No registered workflow yet (OQ-1/OQ-7). The direct-execution route
+            # No registered workflow: registering one is a console action nobody
+            # has taken, so KEEPERHUB_WORKFLOW_ID is unset. The direct-execution route
             # submits the same call through the same service, and the receipt records
             # which route ran so the two are never confused.
             accepted = client.execute_contract_call(

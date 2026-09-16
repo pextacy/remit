@@ -281,9 +281,11 @@ Delegatecall is never enabled for an agent role under any circumstance.
 
 ### 5.1 Contract references
 
-These must be verified against a block explorer before first use and recorded in
-`docs/VERIFIED.md` with the date and source. Do not copy them from here into code without
-that verification step.
+These were verified against a block explorer before first use. Do not copy them from
+here into code: the values the build actually uses live in
+`packages/remit-core/src/chain/addresses.ts`, and
+`pnpm --filter @remit/core verify:constants` re-derives every one of them from Base and
+Base Sepolia. This table is the reading list, not the source of truth.
 
 | Contract | Notes |
 |---|---|
@@ -595,9 +597,15 @@ Residual risks, stated rather than hidden:
 
 ## 11. Verification appendix
 
-`docs/VERIFIED.md` is the single source of truth for every external fact. Required columns:
+Every external fact is verified by something that can be run, not by a table somebody
+maintained:
 
-| Item | Value | Chain | Source URL | Verified on | Verified by |
-|---|---|---|---|---|---|
+| Fact | What re-derives it |
+|---|---|
+| Every chain address and the Safe/USDC/Aave properties behind it | `pnpm --filter @remit/core verify:constants` — reads all of them off Base and Base Sepolia, and exits non-zero on a disagreement *or* on a read that never answered |
+| The receipt chain, and that each receipt commits to the Remit and limits it claims | `uv run --directory packages/remit-bridge remit verify --network base-sepolia` — re-derives every hash from the bytes on disk |
+| The four gates, the refusals, and the hashes, without a chain | `pnpm -r test` and `uv run pytest` |
+| All of the above, plus the history and the working tree | `pnpm --filter ops submit:check` |
 
-Nothing enters code before it enters this table.
+`submit:check` runs the first, third and fourth, so "is this submittable" is one command
+rather than a checklist somebody ticks.

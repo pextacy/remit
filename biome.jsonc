@@ -11,7 +11,7 @@
       // `keeperhub-safe` is written in KeeperHub's conventions, against their tsconfig
       // paths and their formatter. Formatting it to ours would produce a diff a reviewer
       // has to undo, so it is checked by their tooling inside a clone of their repo
-      // instead (docs/VERIFIED.md §17).
+      // instead.
       "!packages/keeperhub-safe"
     ]
   },

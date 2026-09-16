@@ -39,6 +39,26 @@ jobs:
         working-directory: packages/remit-bridge
     steps:
       - uses: actions/checkout@v5
+      # Node and the built core, in the job that is nominally "the Python one".
+      #
+      # The bridge does not reimplement the envelope check, canonical JSON, the EIP-712
+      # digest or the receipt chain — it calls the TypeScript core across a process
+      # boundary, and several tests here exist precisely to prove the two runtimes agree
+      # byte for byte. Without node they do not test that: they fail on `pnpm: not found`
+      # and on a missing `dist/`, which is what this job did the first time it ever ran.
+      # Skipping them instead would have been worse — the parity claim would go unchecked
+      # while the job went green.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        working-directory: .
+      - run: pnpm --filter @remit/core build
+        working-directory: .
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -79,8 +99,25 @@ jobs:
       # Real contracts, real state, nobody's money. A fork is the only acceptable
       # substitute for the chain (CLAUDE.md §2.1), and it is the one CI can afford.
       - name: Fork Base Sepolia
+        env:
+          RPC: ${{ secrets.BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org' }}
         run: |
-          anvil --fork-url https://sepolia.base.org --port 8546 --silent &
+          # Pinned a little behind head, deliberately.
+          #
+          # `sepolia.base.org` is load balanced. A fork pinned to *latest* can read one
+          # storage slot from a backend that has the block and the next from one that does
+          # not, and the EVM sees a state that never existed: the first run of this
+          # workflow supplied 50 USDC to Aave successfully and then reverted withdrawing
+          # 10 of it, which reproduces nowhere. Pinning to a block every backend has makes
+          # the state consistent, and makes a failure here mean something.
+          #
+          # `--retries`/`--timeout` are for the other half of the same problem: a public
+          # endpoint that rate-limits should slow the fork down, not fail it.
+          head=$(cast block-number --rpc-url "$RPC")
+          pin=$((head - 30))
+          echo "forking at $pin (head $head)"
+          anvil --fork-url "$RPC" --fork-block-number "$pin" --port 8546 --silent \
+                --retries 10 --timeout 60000 &
           for i in $(seq 1 60); do
             cast block-number --rpc-url http://127.0.0.1:8546 >/dev/null 2>&1 && break
             sleep 1

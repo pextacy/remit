@@ -77,17 +77,21 @@ These are not style preferences. Violating them invalidates the submission.
 ### 2.2 Never invent an address, ABI, selector, or API path
 
 Contract addresses, function signatures, REST paths and SDK method names must be
-**verified against a source before use**, and the verification recorded in
-`docs/VERIFIED.md` with the date and the source URL.
+**verified against a source before use**, and a chain constant is added only together
+with the check that re-derives it: `packages/remit-core/scripts/verify-constants.ts`
+reads every address in `src/chain/addresses.ts` back off Base and Base Sepolia, and
+`submit:check` runs it. A table saying somebody once looked is a weaker fact than the
+chain answering today.
 
 Acceptable verification sources, in order of preference:
 1. The contract's own deployment on a block explorer (Basescan/Etherscan verified source).
 2. The upstream repository at a pinned commit or tag.
 3. Official documentation at a URL that resolves right now.
 
-If none of these can be reached, the correct action is to **write the verification task
-into `docs/OPEN_QUESTIONS.md` and stop**, not to guess a plausible value. A plausible
-wrong address is far worse than a blocked task — it will move real money to nowhere.
+If none of these can be reached, the correct action is to **stop and say so**, not to
+guess a plausible value. A plausible wrong address is far worse than a blocked task — it
+will move real money to nowhere. `verify:constants` counts a read that never answered
+apart from a constant that changed, and exits non-zero for both, for the same reason.
 
 ### 2.3 Calldata is never authored by a language model
 
@@ -136,8 +140,7 @@ the change is wrong.
 We compose audited contracts (Safe, Zodiac Roles v2) and write **zero custom contracts**.
 An unaudited contract written in a five-day sprint and holding funds is a liability, and
 judges will read it that way. If a requirement seems to need a new contract, first try to
-express it as a Roles v2 condition. Raise it in `docs/OPEN_QUESTIONS.md` before writing
-any `.sol` file.
+express it as a Roles v2 condition. Say so out loud before writing any `.sol` file.
 
 ---
 
@@ -171,9 +174,10 @@ remit/
 │   └── scripts/                  # setup-safe, assign-role, kill-switch, execute-mainnet
 ├── receipts/                     # committed provenance receipts from real runs
 └── docs/
-    ├── VERIFIED.md               # every external address/ABI/path + source + date
-    ├── OPEN_QUESTIONS.md         # blocked verification tasks
-    └── DEMO.md                   # the live demo script
+    ├── CLAUDE.md                 # this file: the working agreement
+    ├── DOCS.md                   # the technical documentation
+    ├── PRD.md                    # what is being built, and what it refuses to do
+    └── PLAN.md                   # the five days, as they were planned
 ```
 
 `packages/keeperhub-safe` is developed here but **must remain a clean, self-contained
@@ -261,7 +265,8 @@ A task is done when all of the following are true. Not four of five.
 
 1. `pnpm -r type-check && pnpm -r lint && pnpm -r test` passes, and `pytest` passes.
 2. At least one test exercises the **failure** path, not only the happy path.
-3. Any new external address, ABI or endpoint is recorded in `docs/VERIFIED.md`.
+3. Any new external address is re-derived from chain by `verify:constants`, and any
+   new ABI or endpoint is read from a pinned source rather than from memory.
 4. No secret, key or credential appears in the diff.
 5. The change has been run against a real network (Anvil fork of Base, Base Sepolia, or
    Base mainnet) and the output is pasted into the PR description or the task notes.
@@ -279,8 +284,8 @@ A task is done when all of the following are true. Not four of five.
   pinned `gnosisguild/zodiac-modifier-roles` source. Surface the decoded reason in G2;
   an undecoded `0x...` is a failed requirement, not an acceptable output.
 - **Almanak SDK surface differs from expectation.** Read the installed package source
-  under `.venv/` at the pinned version. Write what is actually there into
-  `docs/VERIFIED.md`. Never code against a remembered API.
+  under `.venv/` at the pinned version, and write a test against what is actually
+  there. Never code against a remembered API.
 - **Base gas spikes mid-demo.** That is a feature, not a bug — it is the reliability
   story. Let KeeperHub's retry and gas escalation handle it and show the run log.
 - **You are tempted to widen a limit to make something work.** Don't. Fix the intent

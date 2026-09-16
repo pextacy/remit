@@ -1,5 +1,5 @@
 /**
- * Re-derives every row in docs/VERIFIED.md against the live chains.
+ * Re-derives every constant in `src/chain/addresses.ts` against the live chains.
  *
  * This is the capture script CLAUDE.md §2.1 asks for: the constants in
  * `src/chain/addresses.ts` came from pinned upstream sources, and this proves the chain
@@ -248,7 +248,7 @@ if (failures === 0 && unknown === 0) {
 } else {
   if (failures > 0) {
     process.stdout.write(
-      `\n${failures} disagreement(s) — fix docs/VERIFIED.md and addresses.ts before ` +
+      `\n${failures} disagreement(s) — fix src/chain/addresses.ts before ` +
         "building on them\n",
     );
   }

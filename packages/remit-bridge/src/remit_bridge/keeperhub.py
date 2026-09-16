@@ -8,10 +8,18 @@ local signer would make the claim false in exactly the case where it matters.
 
 Everything below was written against the KeeperHub repository at commit
 f8c8f18c754ccbca481774a1c3c0fdf71e282e96 — the routes, the field names, the status
-vocabularies and the auth header all come from the source, and are recorded in
-docs/VERIFIED.md §5. It has **not** been run against the live service, because that
-needs an account nobody has yet (docs/OPEN_QUESTIONS.md OQ-1). Until it has, treat
-every response model here as a reading of the source rather than an observation.
+vocabularies and the auth header all come from the source.
+
+The **direct execution** path has since been run against the live service. Three
+transactions went out through it on Base Sepolia and are in `receipts/base-sepolia`
+(0003, 0004, 0005), each carrying the executionId KeeperHub addressed the run by and
+the hash the chain agrees with. So `execute_contract_call` and `/api/execute/{id}/status`
+are observations now, not a reading.
+
+The **workflow** path is still a reading of the source: registering a workflow is a
+console action nobody has taken, `KEEPERHUB_WORKFLOW_ID` is unset, and the bridge
+therefore takes the direct route and records which one ran. Treat the workflow response
+models below as unverified until an execution comes back through them.
 
 Two shapes exist, and they are not interchangeable:
 
@@ -69,8 +77,8 @@ def _checked_base_url(base_url: str) -> str:
     else's `.env`, or an edit nobody reviewed.
 
     Plaintext is allowed on loopback and nowhere else, because a local stub is how this
-    client is exercised without an account (OQ-1) and a key that never leaves the machine
-    is not a key that leaked.
+    client is exercised without touching the service, and a key that never leaves the
+    machine is not a key that leaked.
     """
     trimmed = base_url.strip().rstrip("/")
     if not trimmed:
@@ -260,7 +268,8 @@ class KeeperHubClient:
         """The direct execution route.
 
         Kept because it is the one path that can be exercised with nothing but an API
-        key, which makes it the fastest way to close OQ-1. `functionArgs` is a JSON
+        key — no workflow to register first — which is why it is the route the three
+        Base Sepolia executions went out through. `functionArgs` is a JSON
         **string** in this API, not an array — a detail that costs an afternoon if it
         is guessed rather than read.
         """

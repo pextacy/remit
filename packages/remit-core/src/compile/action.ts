@@ -2,7 +2,8 @@
  * Intent → calldata. The only place in this repository where calldata is built.
  *
  * Every byte comes from an ABI that was verified against the chain and committed
- * (docs/VERIFIED.md), and every argument comes from a schema-validated intent. There is
+ * (`chain/addresses.ts`, re-derived by `verify:constants`), and every argument comes
+ * from a schema-validated intent. There is
  * no parameter here that a strategy can fill with an arbitrary address-and-selector pair,
  * which is what makes "the agent proposes, the chain enforces" mean something.
  *

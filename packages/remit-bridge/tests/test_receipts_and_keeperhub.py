@@ -177,8 +177,8 @@ class TestWhereTheKeyIsAllowedToGo:
     def test_plain_http_on_loopback_is_how_this_is_exercised_without_an_account(
         self,
     ) -> None:
-        # A local stub is the only way to run this client without an account (OQ-1), and
-        # a key that never leaves the machine is not a key that leaked.
+        # A local stub is how this client is exercised without touching the service,
+        # and a key that never leaves the machine is not a key that leaked.
         client = KeeperHubClient("kh_key_value_here", base_url="http://127.0.0.1:8099/")
         try:
             assert client._base_url == "http://127.0.0.1:8099"

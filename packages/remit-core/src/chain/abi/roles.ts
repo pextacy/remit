@@ -12,7 +12,7 @@
  * requirement (CLAUDE.md §8).
  *
  * Do not edit by hand. Re-generate from the pinned source if the mastercopy
- * version ever changes, and re-record the row in docs/VERIFIED.md.
+ * version ever changes, and re-run `verify:constants` against the new mastercopy.
  */
 export const rolesAbi = [
   {

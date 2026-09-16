@@ -2,7 +2,8 @@
  * The two ERC-20 entry points the preset scopes. Signatures are EIP-20 canonical
  * (https://eips.ethereum.org/EIPS/eip-20); `approve` selector 0x095ea7b3 confirmed with
  * `cast sig`, and the deployment at `USDC[8453]` answers `symbol() = "USDC"` and
- * `decimals() = 6` on chain. Verified 2026-09-13 — see docs/VERIFIED.md.
+ * `decimals() = 6` on chain. Verified 2026-09-13, and re-read from both chains by
+ * `verify:constants`.
  */
 export const erc20Abi = [
   {
