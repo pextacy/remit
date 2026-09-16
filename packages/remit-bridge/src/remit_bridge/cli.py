@@ -34,6 +34,7 @@ from typing import Any
 from remit_bridge import amounts, core, receipts, review
 from remit_bridge.config import (
     REPO_ROOT,
+    Deployment,
     env_rpc_url,
     load_deployment,
     load_remit,
@@ -77,6 +78,33 @@ def _build_intent(kind: str, amount_units: str, counterparty: str) -> dict[str, 
     if kind == "withdraw":
         return {**base, "to": counterparty}
     raise ConfigError(f"--kind must be approve, supply or withdraw, not {kind}")
+
+
+def _default_counterparty(kind: str, deployment: Deployment) -> str:
+    """Where an intent points when the caller does not say.
+
+    `approve` names a spender and the only thing worth approving is the venue the role
+    may call anyway; everything else names where value lands, which is the Safe. G1
+    checks the two against different lists for exactly this reason.
+    """
+    if kind == "approve":
+        answer, _ = core.invoke(
+            "compile",
+            {
+                "chainId": deployment.chain_id,
+                # A one-unit supply, compiled only to be asked what it targets: the pool
+                # address comes from the core's verified table rather than from a second
+                # copy of it here.
+                "intent": {
+                    "kind": "supply",
+                    "asset": "USDC",
+                    "amount": "1",
+                    "onBehalfOf": deployment.safe,
+                },
+            },
+        )
+        return str(answer["action"]["target"])
+    return deployment.safe
 
 
 def _to_units(amount: str) -> str:
@@ -283,7 +311,13 @@ def _run_locked(args: argparse.Namespace) -> int:
         )
         return 5
 
-    counterparty = args.to or deployment.safe
+    # The sensible default differs by kind, and getting it wrong is instructive: value
+    # goes to the Safe, but an approval goes to the venue. `propose` has always picked
+    # per kind; this defaulted every kind to the Safe, so `remit run --kind approve` was
+    # refused at G1 as `OUT_OF_REMIT_SPENDER` unless the caller knew to pass `--to`.
+    # G1 was right both times — the two paths simply disagreed about the default, which
+    # is the one thing a product path and a hand-run path may not do.
+    counterparty = args.to or _default_counterparty(args.kind, deployment)
     intent = _build_intent(args.kind, _to_units(args.amount), counterparty)
     _say(f"intent     {json.dumps(intent)}")
 
@@ -789,7 +823,11 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--network", default="base-sepolia")
     run.add_argument("--kind", default="supply")
     run.add_argument("--amount", default="1")
-    run.add_argument("--to", default=None, help="counterparty; defaults to the Safe")
+    run.add_argument(
+        "--to",
+        default=None,
+        help="counterparty; defaults to the Aave pool for approve, the Safe otherwise",
+    )
     run.add_argument(
         "--review-timeout",
         type=float,

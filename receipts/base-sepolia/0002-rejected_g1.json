@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "sequence": 2,
+  "at": 1789552422,
+  "network": "base-sepolia",
+  "chainId": 84532,
+  "remitHash": "0x21297f434239b179c57791cafc7bfb41ae2799d8c0d40a25e71d9986920925b4",
+  "strategyHash": "0xd97a794ba0c4aa02a9937c88943289cf1e3257e6416caab38dfc0f0d1b980a66",
+  "workflowHash": "0xdfdda4b121e81cbe41742a26dd6ec1cb78e0d066c1c10517b2ebbe16b8353a68",
+  "limitsHash": "0x7c2c5a2e1954e513346913d3b6015e1861bd8d14b735ad0ae3c2cbaea52e84d2",
+  "roleKey": "0x72656d69742d6167656e74000000000000000000000000000000000000000000",
+  "safe": "0x4e67371BA5cA46BF64a2B91c7b51bB8b0bfC87d1",
+  "rolesModifier": "0xe8777944e78B34e788f57a340Ea85F3D7c04FA68",
+  "agent": "0x1fC8Ed19F28e9f16a8F047383DDc322617503796",
+  "intent": {
+    "kind": "approve",
+    "amount": "1000000",
+    "asset": "USDC",
+    "spender": "0x4e67371BA5cA46BF64a2B91c7b51bB8b0bfC87d1"
+  },
+  "action": null,
+  "gates": [
+    {
+      "gate": "G1",
+      "outcome": "refused",
+      "code": "OUT_OF_REMIT_SPENDER",
+      "detail": "the Remit does not permit approving this spender"
+    }
+  ],
+  "outcome": "rejected_g1",
+  "submission": {
+    "path": "none",
+    "executionId": null,
+    "workflowId": null,
+    "txHash": null,
+    "explorer": null,
+    "gasUsed": null
+  },
+  "prevHash": "0x4c29bdffdca3f19be18c64164246ed8f12836cedb3bc64c91ba7940bff77ae50",
+  "selfHash": "0x448f20b4f63364d684aaffa3546b7961ec9128ac294462475009edc5300f2c10"
+}

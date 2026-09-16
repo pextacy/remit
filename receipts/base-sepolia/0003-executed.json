@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "sequence": 3,
+  "at": 1789552450,
+  "network": "base-sepolia",
+  "chainId": 84532,
+  "remitHash": "0x21297f434239b179c57791cafc7bfb41ae2799d8c0d40a25e71d9986920925b4",
+  "strategyHash": "0xd97a794ba0c4aa02a9937c88943289cf1e3257e6416caab38dfc0f0d1b980a66",
+  "workflowHash": "0xdfdda4b121e81cbe41742a26dd6ec1cb78e0d066c1c10517b2ebbe16b8353a68",
+  "limitsHash": "0x7c2c5a2e1954e513346913d3b6015e1861bd8d14b735ad0ae3c2cbaea52e84d2",
+  "roleKey": "0x72656d69742d6167656e74000000000000000000000000000000000000000000",
+  "safe": "0x4e67371BA5cA46BF64a2B91c7b51bB8b0bfC87d1",
+  "rolesModifier": "0xe8777944e78B34e788f57a340Ea85F3D7c04FA68",
+  "agent": "0x1fC8Ed19F28e9f16a8F047383DDc322617503796",
+  "intent": {
+    "kind": "approve",
+    "amount": "1000000",
+    "asset": "USDC",
+    "spender": "0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27"
+  },
+  "action": {
+    "target": "0xba50Cd2A20f6DA35D788639E581bca8d0B5d4D5f",
+    "signature": "approve(address,uint256)",
+    "selector": "0x095ea7b3",
+    "description": "approve 0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27 to spend 1000000 USDC",
+    "usd": "1"
+  },
+  "gates": [
+    {
+      "gate": "G1",
+      "outcome": "pass"
+    },
+    {
+      "gate": "G2",
+      "outcome": "pass",
+      "detail": "preflight clean, no gas spent"
+    },
+    {
+      "gate": "G4",
+      "outcome": "pass",
+      "detail": "completed"
+    }
+  ],
+  "outcome": "executed",
+  "submission": {
+    "path": "keeperhub",
+    "executionId": "rt712vdhrg97pfh9oego7",
+    "workflowId": null,
+    "txHash": "0x939bd364fab532d7f1af8fddc588e3a5e0c84abd4073a7367f5895a189d698fd",
+    "explorer": "https://sepolia.basescan.org/tx/0x939bd364fab532d7f1af8fddc588e3a5e0c84abd4073a7367f5895a189d698fd",
+    "gasUsed": null
+  },
+  "prevHash": "0x448f20b4f63364d684aaffa3546b7961ec9128ac294462475009edc5300f2c10",
+  "selfHash": "0x0bf679887b0d15b03bf5ad78721a84fd41183513fa03da8cf1d5e77069b5c13e"
+}
