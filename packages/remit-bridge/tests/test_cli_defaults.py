@@ -54,6 +54,7 @@ class TestDefaultCounterparty:
             "approving the Safe is the bug this default exists to prevent: G1 checks a "
             "spender against the venues, not against where value may land"
         )
+        assert len(asked) == 1, "one question to the core, not one per field"
 
     def test_the_venue_comes_from_the_core(self, asked: list[Any]) -> None:
         """Not from a second copy of the address table living in the CLI."""
