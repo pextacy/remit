@@ -44,15 +44,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </header>
 
         <main>
-          {/*
-            The remit line. One hairline at the cap, running the height of every screen,
-            drawn behind the content so that an amount which exceeds the cap crosses it
-            rather than stopping at it.
-          */}
-          <div className="spine">
-            <div className="remit-line" aria-hidden="true" />
-            {children}
-          </div>
+          <div className="spine">{children}</div>
         </main>
 
         <footer className="band">

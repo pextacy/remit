@@ -76,28 +76,27 @@
   min-height: calc(100vh - var(--band) * 2);
 }
 
-[data-inverted]::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background: var(--paper);
-  z-index: -1;
-}
-
 /*
- * The line again, drawn inside the inverted context so it takes that context's ink. The
- * layout's own line is still there and is now dark on dark, which is to say invisible —
- * so there is one line on the screen, and it is the readable one.
+ * The dark ground, drawn to the height of what it is behind.
+ *
+ * It was `position: fixed; inset: 0`, which is the viewport rather than the page: on a
+ * screen taller than the window — the kill switch is, once the calldata is on it — the
+ * ground stopped at the fold and the rest of the content carried on over the light page
+ * underneath, cut off mid-sentence. Absolute, against the wrapper's own `position:
+ * relative`, means it is exactly as tall as the thing it inverts.
  */
-[data-inverted]::after {
+[data-inverted]::before {
   content: "";
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 66.666%;
-  width: 1px;
-  background: var(--ink);
-  pointer-events: none;
+  /* Edge to edge horizontally, because a page that turns over turns all the way over —
+     the spine's gutters are a measure for type, not a frame to paint inside. */
+  left: 50%;
+  width: 100vw;
+  margin-left: -50vw;
+  background: var(--paper);
+  z-index: -1;
 }
 
 * {
@@ -225,23 +224,20 @@ main {
 }
 
 /**
- * The remit line. One hairline, full height, at the cap.
+ * The cap is marked on the measure, not across the page.
  *
- * Drawn behind the content so a measure that exceeds the cap crosses it rather than
- * stopping at it — which is the whole point of having drawn it.
+ * There used to be one full-height hairline here, at the cap, drawn behind everything so
+ * that a bar exceeding the cap would cross it. The idea was right and the drawing was
+ * wrong: a page-height line at full ink passes through body text, through table cells and
+ * through the four-gate grid, and on a screen with no measure on it at all — the review
+ * queue when nothing is waiting — it struck through a sentence. A boundary that cuts
+ * through the type is read as a rendering fault, not as a boundary.
+ *
+ * So the cap is drawn where it means something: a short tick on the measure itself, next
+ * to the bar it bounds. Same fact, same scale, nothing crossing anything that is being
+ * read.
  */
-.remit-line {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: calc(var(--gutter) + (100% - var(--gutter) * 2) * 0.66666);
-  width: 1px;
-  background: var(--ink);
-  z-index: 0;
-  pointer-events: none;
-}
-
-.spine > *:not(.remit-line) {
+.spine > * {
   position: relative;
   z-index: 1;
 }
@@ -566,7 +562,6 @@ section:last-of-type {
   grid-template-columns: repeat(4, 1fr);
   gap: 0;
   border-top: 1px solid var(--rule);
-  width: 66.666%;
 }
 
 .sequence-gate {
@@ -629,12 +624,9 @@ section:last-of-type {
 /* ---- figures ----------------------------------------------------------- */
 
 /**
- * Three across, because three columns put a rule exactly on the remit line.
- *
- * The line is drawn the full height of the page, so anything laid out across it has to
- * agree with it — a boundary that cuts through the middle of a number would make the page
- * look like two designs fighting. Four equal columns break at 25/50/75 and collide; three
- * break at 33.3 and 66.6, and the second one *is* the line.
+ * Three across. Every rule on a page agrees with every other, so columns break at 33.3
+ * and 66.6 wherever they appear, and a reader's eye travels down one edge rather than
+ * finding a new one in each section.
  */
 .figures {
   display: grid;
@@ -643,15 +635,20 @@ section:last-of-type {
   border-top: 1px solid var(--rule);
 }
 
-/**
- * The four gates sit inside the remit, ending exactly on it.
+/*
+ * A grid that opens a section does not draw its own rule.
  *
- * Four columns across the left two thirds: the last one closes on the line. The gates are
- * what the agent is allowed to be stopped by, so they belong on the permitted side of it.
+ * The section above already closed with one, and the section's padding then put a second
+ * hairline 40px below the first with nothing between them — two lines that look like a
+ * table header somebody forgot to fill in.
  */
+section > .figures:first-child {
+  border-top: 0;
+}
+
+/** The four gates, one column each, across the full measure of the page. */
 .figures[data-inside="true"] {
   grid-template-columns: repeat(4, 1fr);
-  width: 66.666%;
 }
 
 .figure {
@@ -757,6 +754,17 @@ section:last-of-type {
 
 .record[data-refused="true"] .record-outcome {
   font-weight: 700;
+}
+
+/*
+ * The measure sits under what it measures.
+ *
+ * It used to span the whole row, which put a bar about an *amount* underneath the gate
+ * ticks and the verdict — two columns it says nothing about. Held to the same width as
+ * the description, the row reads as one column of facts with its measure beneath it.
+ */
+.record .measure {
+  width: 66.666%;
 }
 
 /* Metadata about a record stays inside the remit; only the measure may leave it. */
@@ -923,8 +931,7 @@ button:focus-visible {
 /* ---- states ------------------------------------------------------------ */
 
 .empty {
-  padding: 32px 0;
-  border-top: 1px solid var(--rule);
+  padding: 8px 0 0;
   color: var(--quiet);
   font-family: var(--font-data), ui-monospace, monospace;
   font-size: 12px;
@@ -1001,17 +1008,16 @@ footer .band-inner {
   }
 
   /*
-   * The line becomes the right margin, so the cap does too — and the measures have to
-   * follow it. A bar drawn against a boundary that has moved is a bar that means nothing:
-   * two thirds of the page is where the cap was, not where it is.
+   * Narrow enough that two thirds of the track is a stub, so the cap moves to the right
+   * margin and the bars stretch to meet it. The tick moves with them: a bar drawn against
+   * a boundary that has moved is a bar that means nothing.
    */
-  .remit-line {
-    left: auto;
-    right: var(--gutter);
-  }
-
   .measure-bar {
     width: calc(var(--measure, 0%) * 1.5);
+  }
+
+  .measure-cap {
+    left: 100%;
   }
 
   .band-inner {

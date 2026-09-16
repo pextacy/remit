@@ -97,10 +97,10 @@ const CAP_SHARE = 66.666;
 /**
  * How far along the page an amount reaches, with the cap on the remit line.
  *
- * The length is the number. An amount at the cap lands exactly on the line; one above it
- * crosses and is cut off at the container edge, which is the only thing in this design
- * allowed to cross. A bar that lied about its length would make every other number on the
- * screen worth doubting.
+ * The length is the number. An amount at the cap lands exactly on the cap tick; one above
+ * it crosses the tick and is cut off at the container edge, which is the only thing in
+ * this design allowed to cross. A bar that lied about its length would make every other
+ * number on the screen worth doubting.
  */
 export function measureWidth(amount: number, cap: number): string {
   if (!(cap > 0) || !Number.isFinite(amount) || amount <= 0) return "0%";
@@ -121,7 +121,7 @@ export function Measure({
   refused?: boolean;
   left?: ReactNode;
   right?: ReactNode;
-  /** Draw the cap tick. Off inside the spine, where the page's own line already marks it. */
+  /** The cap tick. Drawn by default; pass false where the cap is stated beside the bar. */
   showCap?: boolean;
   /**
    * A second threshold on the same track — the point at which an action stops for a
@@ -144,7 +144,7 @@ export function Measure({
             <span>{mark.label}</span>
           </div>
         )}
-        {showCap === true ? <div className="measure-cap" /> : null}
+        {showCap === false ? null : <div className="measure-cap" />}
       </div>
       {left === undefined && right === undefined ? null : (
         <div className="measure-foot">
