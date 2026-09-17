@@ -17,6 +17,23 @@ const config: NextConfig = {
   turbopack: { root: REPO_ROOT },
   outputFileTracingRoot: REPO_ROOT,
   typedRoutes: true,
+
+  /**
+   * The evidence travels with the deployment.
+   *
+   * Every page here reads files this package does not import — receipts, the Remit, the
+   * deployment record — so nothing traces them and a hosted build would ship a console
+   * with nothing to show. Named one directory at a time rather than by a wide glob: the
+   * three that are evidence go, and the review queue (a moment, not a record) and every
+   * key-bearing file stay where they are.
+   */
+  outputFileTracingIncludes: {
+    "/**": [
+      "../../receipts/base-sepolia/**",
+      "../../ops/remits/base-sepolia.json",
+      "../../ops/deployments/base-sepolia.json",
+    ],
+  },
 };
 
 export default config;

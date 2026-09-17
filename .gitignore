@@ -54,3 +54,8 @@ packages/remit-console/AGENTS.md
 receipts/*/.pipeline.lock
 receipts/*/.append.lock
 ops/deployments/*.ledger.json.lock
+
+# Written by the Vercel CLI when the console is deployed: the project and organisation
+# ids for this machine's link to it. Not a secret, and not a fact about the repository
+# either — somebody else's clone deploys to their own project, not ours.
+.vercel
